@@ -655,10 +655,10 @@ setup_firewall() {
     
     # Save iptables rules
     if command -v netfilter-persistent &> /dev/null; then
-        netfilter-persistent save > /dev/null 2>&1
+        netfilter-persistent save > /dev/null 2>&1 || true
     else
-        apt-get install -y -qq iptables-persistent > /dev/null 2>&1
-        netfilter-persistent save > /dev/null 2>&1
+        DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent > /dev/null 2>&1 || true
+        netfilter-persistent save > /dev/null 2>&1 || true
     fi
     
     # Open ports with ufw if available
