@@ -635,42 +635,67 @@ EOF
 }
 
 setup_firewall() {
-    log_info "Configuring firewall and iptables..."
+    log_info "Configuring firewall (safe mode - won't break existing rules)..."
     
     # Get default interface
     DEFAULT_IF=$(ip route | grep default | awk '{print $5}' | head -1)
     
-    # Clear existing rules for ocserv
-    iptables -t nat -D POSTROUTING -o $DEFAULT_IF -j MASQUERADE 2>/dev/null || true
+    if [[ -z "$DEFAULT_IF" ]]; then
+        log_warning "Could not detect default interface, skipping firewall config"
+        return
+    fi
     
-    # Configure NAT
-    iptables -t nat -A POSTROUTING -o $DEFAULT_IF -j MASQUERADE
+    # ═══════════════════════════════════════════════════════════
+    # SAFE MODE: Only ADD rules, never DELETE or FLUSH
+    # This prevents breaking SSH or other services
+    # ═══════════════════════════════════════════════════════════
     
-    # Allow forwarding
-    iptables -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
-    iptables -A FORWARD -s 192.168.100.0/24 -j ACCEPT
+    # Check if MASQUERADE rule already exists before adding
+    if ! iptables -t nat -C POSTROUTING -o $DEFAULT_IF -j MASQUERADE 2>/dev/null; then
+        iptables -t nat -A POSTROUTING -o $DEFAULT_IF -j MASQUERADE
+        log_info "Added NAT MASQUERADE rule"
+    fi
     
-    # MSS Clamping - جلوگیری از مشکلات MTU
-    iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    # Check if forwarding rules exist before adding
+    if ! iptables -C FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
+        iptables -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+    fi
     
-    # Save iptables rules
+    if ! iptables -C FORWARD -s 192.168.100.0/24 -j ACCEPT 2>/dev/null; then
+        iptables -A FORWARD -s 192.168.100.0/24 -j ACCEPT
+    fi
+    
+    # MSS Clamping (safe to add)
+    iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+    
+    # Save iptables rules (non-interactive)
     if command -v netfilter-persistent &> /dev/null; then
         netfilter-persistent save > /dev/null 2>&1 || true
     else
+        # Pre-configure answers for iptables-persistent
+        echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections 2>/dev/null || true
+        echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections 2>/dev/null || true
         DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent > /dev/null 2>&1 || true
         netfilter-persistent save > /dev/null 2>&1 || true
     fi
     
-    # Open ports with ufw if available
+    # ═══════════════════════════════════════════════════════════
+    # UFW: Only add ALLOW rules, never disable or reset
+    # ═══════════════════════════════════════════════════════════
     if command -v ufw &> /dev/null; then
-        ufw allow ${OCSERV_PORT}/tcp > /dev/null 2>&1
-        ufw allow ${OCSERV_PORT}/udp > /dev/null 2>&1
-        ufw allow ${PANEL_PORT}/tcp > /dev/null 2>&1
-        ufw allow 80/tcp > /dev/null 2>&1
-        ufw allow 443/tcp > /dev/null 2>&1
+        # Make sure SSH is always allowed first!
+        ufw allow 22/tcp > /dev/null 2>&1 || true
+        ufw allow ssh > /dev/null 2>&1 || true
+        
+        # Then allow our ports
+        ufw allow ${OCSERV_PORT}/tcp > /dev/null 2>&1 || true
+        ufw allow ${OCSERV_PORT}/udp > /dev/null 2>&1 || true
+        ufw allow ${PANEL_PORT}/tcp > /dev/null 2>&1 || true
+        
+        log_info "UFW rules added (SSH: allowed, VPN: ${OCSERV_PORT}, Panel: ${PANEL_PORT})"
     fi
     
-    log_success "Firewall configured"
+    log_success "Firewall configured (safe mode - existing rules preserved)"
 }
 
 start_services() {
