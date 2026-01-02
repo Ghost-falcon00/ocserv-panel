@@ -61,8 +61,9 @@ async def create_default_admin():
     """Create default admin if not exists"""
     async with async_session() as session:
         from sqlalchemy import select
-        result = await session.execute(select(Admin))
-        if not result.scalar_one_or_none():
+        result = await session.execute(select(Admin).limit(1))
+        existing = result.scalar()
+        if not existing:
             admin = Admin(
                 username="admin",
                 password_hash=Admin.hash_password("admin"),
