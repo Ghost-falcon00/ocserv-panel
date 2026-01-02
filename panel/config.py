@@ -8,6 +8,11 @@ from pydantic import Field
 from pathlib import Path
 from typing import Optional
 import secrets
+import os
+
+
+# Get base directory
+BASE_DIR = Path(__file__).parent
 
 
 class Settings(BaseSettings):
@@ -16,9 +21,8 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     
-    # Paths
-    BASE_DIR: Path = Path(__file__).parent
-    DATABASE_PATH: Path = Field(default=None)
+    # Paths - use computed default
+    DATABASE_PATH: str = str(BASE_DIR / "data" / "panel.db")
     
     # Security
     SECRET_KEY: str = secrets.token_urlsafe(32)
@@ -34,11 +38,11 @@ class Settings(BaseSettings):
     # Panel settings
     PANEL_PORT: int = 8443
     PANEL_HOST: str = "0.0.0.0"
-    PANEL_PATH: Optional[str] = None  # Secret path for extra security
+    PANEL_PATH: str = ""  # Secret path for extra security
     
     # Domain and Admin (set by installer)
-    DOMAIN: Optional[str] = None
-    ADMIN_USER: Optional[str] = None
+    DOMAIN: str = ""
+    ADMIN_USER: str = ""
     
     # Traffic monitoring interval (seconds)
     TRAFFIC_CHECK_INTERVAL: int = 60
@@ -50,11 +54,13 @@ class Settings(BaseSettings):
         extra="ignore"  # Ignore extra fields in .env
     )
     
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Set default database path after init
-        if self.DATABASE_PATH is None:
-            self.DATABASE_PATH = self.BASE_DIR / "data" / "panel.db"
+    @property
+    def base_dir(self) -> Path:
+        return BASE_DIR
+    
+    @property
+    def database_path(self) -> Path:
+        return Path(self.DATABASE_PATH)
 
 
 settings = Settings()
