@@ -171,6 +171,11 @@ install_dependencies() {
     log_info "Installing dependencies..."
     
     apt-get update -qq
+    
+    # Remove old broken certbot first
+    apt-get remove -y certbot python3-certbot 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+    
     apt-get install -y -qq \
         curl \
         wget \
@@ -181,49 +186,92 @@ install_dependencies() {
         ocserv \
         gnutls-bin \
         net-tools \
-        snapd \
+        openssl \
+        psmisc \
         > /dev/null 2>&1
-    
-    # Fix pyOpenSSL issue on Ubuntu 22.04
-    pip3 install --upgrade pyOpenSSL cryptography 2>/dev/null || true
-    
-    # Install certbot via snap (more reliable than apt)
-    snap install core 2>/dev/null || true
-    snap refresh core 2>/dev/null || true
-    snap install --classic certbot 2>/dev/null || apt-get install -y -qq certbot > /dev/null 2>&1
-    ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
     
     log_success "Dependencies installed"
 }
 
 setup_ssl() {
-    log_info "Obtaining SSL certificate for $DOMAIN..."
+    log_info "Setting up SSL certificate for $DOMAIN..."
     
-    # Stop services that might use port 80
-    systemctl stop nginx 2>/dev/null || true
-    systemctl stop apache2 2>/dev/null || true
-    systemctl stop ocserv 2>/dev/null || true
-    fuser -k 80/tcp 2>/dev/null || true
+    # Create SSL directory
+    mkdir -p /etc/ocserv/ssl
     
-    sleep 2
-    
-    # Get certificate
-    certbot certonly --standalone --non-interactive --agree-tos \
-        --email admin@$DOMAIN \
-        -d $DOMAIN \
-        --preferred-challenges http
-    
-    if [[ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
-        log_error "Failed to obtain SSL certificate"
-        exit 1
+    # Check if Let's Encrypt cert already exists
+    if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+        log_info "Found existing Let's Encrypt certificate"
+        ln -sf /etc/letsencrypt/live/$DOMAIN/fullchain.pem /etc/ocserv/ssl/server-cert.pem
+        ln -sf /etc/letsencrypt/live/$DOMAIN/privkey.pem /etc/ocserv/ssl/server-key.pem
+        USE_LETSENCRYPT=true
+        log_success "Using existing Let's Encrypt certificate"
+        return
     fi
     
-    log_success "SSL certificate obtained"
+    # Ask user about SSL type
+    echo ""
+    log_warning "Port 80 required for Let's Encrypt. If busy, use self-signed."
+    read -p "$(echo -e ${YELLOW}Use self-signed certificate? \[y/N\]: ${NC})" USE_SELFSIGNED
     
-    # Setup auto-renewal with ocserv reload
-    cat > /etc/cron.d/certbot-ocserv << EOF
-0 0 1 * * root certbot renew --quiet --deploy-hook "systemctl reload ocserv && systemctl restart ocserv-panel"
-EOF
+    if [[ "$USE_SELFSIGNED" =~ ^[Yy]$ ]]; then
+        log_info "Creating self-signed certificate..."
+        create_self_signed_cert
+    else
+        log_info "Attempting to get Let's Encrypt certificate..."
+        
+        # Stop services that might use port 80
+        systemctl stop nginx 2>/dev/null || true
+        systemctl stop apache2 2>/dev/null || true
+        systemctl stop ocserv 2>/dev/null || true
+        fuser -k 80/tcp 2>/dev/null || true
+        
+        sleep 2
+        
+        # Try snap certbot first
+        if command -v snap &> /dev/null; then
+            snap install core 2>/dev/null || true
+            snap install --classic certbot 2>/dev/null || true
+            CERTBOT_CMD="/snap/bin/certbot"
+        else
+            CERTBOT_CMD="certbot"
+        fi
+        
+        # Try to get certificate
+        $CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
+            --email admin@$DOMAIN \
+            -d $DOMAIN \
+            --preferred-challenges http 2>/dev/null
+        
+        if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+            ln -sf /etc/letsencrypt/live/$DOMAIN/fullchain.pem /etc/ocserv/ssl/server-cert.pem
+            ln -sf /etc/letsencrypt/live/$DOMAIN/privkey.pem /etc/ocserv/ssl/server-key.pem
+            log_success "Let's Encrypt certificate obtained"
+            
+            # Setup auto-renewal
+            cat > /etc/cron.d/certbot-ocserv << 'CRONEOF'
+0 0 1 * * root /snap/bin/certbot renew --quiet && systemctl reload ocserv
+CRONEOF
+        else
+            log_warning "Let's Encrypt failed. Creating self-signed certificate..."
+            create_self_signed_cert
+        fi
+    fi
+}
+
+create_self_signed_cert() {
+    log_info "Generating self-signed certificate (valid for 10 years)..."
+    
+    openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
+        -subj "/C=IR/ST=Tehran/L=Tehran/O=OCServ/CN=$DOMAIN" \
+        -keyout /etc/ocserv/ssl/server-key.pem \
+        -out /etc/ocserv/ssl/server-cert.pem \
+        > /dev/null 2>&1
+    
+    chmod 600 /etc/ocserv/ssl/*.pem
+    
+    log_success "Self-signed certificate created"
+    log_warning "Note: Clients will see a certificate warning (normal for self-signed)"
 }
 
 configure_ocserv() {
@@ -251,8 +299,8 @@ socket-file = /run/ocserv.socket
 isolate-workers = true
 
 # SSL Certificate
-server-cert = /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
-server-key = /etc/letsencrypt/live/${DOMAIN}/privkey.pem
+server-cert = /etc/ocserv/ssl/server-cert.pem
+server-key = /etc/ocserv/ssl/server-key.pem
 
 # Connection Limits
 max-clients = 128
