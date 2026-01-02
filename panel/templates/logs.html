@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}لاگ‌ها | OCServ Panel{% endblock %}
+
+{% block page_title %}لاگ‌ها{% endblock %}
+
+{% block content %}
+<div class="logs-page">
+    <!-- Filters -->
+    <div class="page-actions">
+        <div class="filter-group">
+            <div class="form-group">
+                <input type="text" id="filter-username" placeholder="فیلتر نام کاربری">
+            </div>
+
+            <div class="form-group">
+                <input type="date" id="filter-from" placeholder="از تاریخ">
+            </div>
+
+            <div class="form-group">
+                <input type="date" id="filter-to" placeholder="تا تاریخ">
+            </div>
+
+            <button class="btn btn-secondary" onclick="loadLogs()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                جستجو
+            </button>
+        </div>
+
+        <button class="btn btn-danger" onclick="cleanupLogs()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+            پاکسازی لاگ‌های قدیمی
+        </button>
+    </div>
+
+    <!-- Stats Summary -->
+    <div class="stats-grid small">
+        <div class="stat-card mini">
+            <span class="stat-value" id="log-total">-</span>
+            <span class="stat-label">کل لاگ‌ها</span>
+        </div>
+        <div class="stat-card mini">
+            <span class="stat-value" id="log-today">-</span>
+            <span class="stat-label">امروز</span>
+        </div>
+        <div class="stat-card mini">
+            <span class="stat-value" id="log-traffic">-</span>
+            <span class="stat-label">ترافیک امروز</span>
+        </div>
+    </div>
+
+    <!-- Logs Table -->
+    <div class="card">
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>کاربر</th>
+                        <th>IP کلاینت</th>
+                        <th>IP VPN</th>
+                        <th>زمان اتصال</th>
+                        <th>زمان قطع</th>
+                        <th>مدت</th>
+                        <th>ترافیک</th>
+                    </tr>
+                </thead>
+                <tbody id="logs-table-body">
+                    <tr>
+                        <td colspan="7" class="loading-cell">
+                            <div class="loading-spinner"></div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentPage = 1;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        checkAuth();
+        loadLogs();
+        loadStats();
+    });
+
+    async function loadStats() {
+        try {
+            const stats = await apiGet('/api/logs/stats/summary');
+
+            document.getElementById('log-today').textContent = stats.today.connections;
+            document.getElementById('log-traffic').textContent = formatBytes(stats.today.traffic_total);
+        } catch (error) {
+            console.error('Error loading stats:', error);
+        }
+    }
+
+    async function loadLogs() {
+        const username = document.getElementById('filter-username').value;
+        const fromDate = document.getElementById('filter-from').value;
+        const toDate = document.getElementById('filter-to').value;
+
+        let params = `page=${currentPage}&per_page=50`;
+        if (username) params += `&username=${encodeURIComponent(username)}`;
+        if (fromDate) params += `&from_date=${fromDate}T00:00:00`;
+        if (toDate) params += `&to_date=${toDate}T23:59:59`;
+
+        try {
+            const data = await apiGet(`/api/logs?${params}`);
+            document.getElementById('log-total').textContent = data.total;
+            renderLogsTable(data.logs);
+            renderPagination(data);
+        } catch (error) {
+            console.error('Error loading logs:', error);
+            showToast('خطا در دریافت لاگ‌ها', 'error');
+        }
+    }
+
+    function renderLogsTable(logs) {
+        const tbody = document.getElementById('logs-table-body');
+
+        if (logs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">لاگی یافت نشد</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = logs.map(log => `
+        <tr>
+            <td>
+                <span class="user-link">${log.username}</span>
+            </td>
+            <td>${log.client_ip || '-'}</td>
+            <td>${log.vpn_ip || '-'}</td>
+            <td>${formatDateTime(log.connected_at)}</td>
+            <td>${log.disconnected_at ? formatDateTime(log.disconnected_at) : '<span class="status-badge online">آنلاین</span>'}</td>
+            <td>${formatDuration(log.duration_seconds)}</td>
+            <td>
+                <div class="traffic-mini">
+                    <span class="traffic-in">↓ ${formatBytes(log.traffic_in)}</span>
+                    <span class="traffic-out">↑ ${formatBytes(log.traffic_out)}</span>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+    }
+
+    function renderPagination(data) {
+        const container = document.getElementById('pagination');
+        if (data.pages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
+        let html = '';
+
+        if (currentPage > 1) {
+            html += `<button class="page-btn" onclick="goToPage(${currentPage - 1})">قبلی</button>`;
+        }
+
+        for (let i = 1; i <= data.pages; i++) {
+            if (i === 1 || i === data.pages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+            } else if (i === currentPage - 3 || i === currentPage + 3) {
+                html += '<span class="page-ellipsis">...</span>';
+            }
+        }
+
+        if (currentPage < data.pages) {
+            html += `<button class="page-btn" onclick="goToPage(${currentPage + 1})">بعدی</button>`;
+        }
+
+        container.innerHTML = html;
+    }
+
+    function goToPage(page) {
+        currentPage = page;
+        loadLogs();
+    }
+
+    function formatDateTime(dateStr) {
+        if (!dateStr) return '-';
+        const date = new Date(dateStr);
+        return date.toLocaleString('fa-IR', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    function formatDuration(seconds) {
+        if (!seconds) return '-';
+
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+
+        if (hours > 0) {
+            return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+        return `${minutes}:${String(secs).padStart(2, '0')}`;
+    }
+
+    async function cleanupLogs() {
+        const days = prompt('حذف لاگ‌های قدیمی‌تر از چند روز؟', '30');
+        if (!days) return;
+
+        try {
+            const result = await apiDelete(`/api/logs/cleanup?days=${days}`);
+            showToast(result.message, 'success');
+            loadLogs();
+            loadStats();
+        } catch (error) {
+            showToast('خطا در پاکسازی لاگ‌ها', 'error');
+        }
+    }
+</script>
+{% endblock %}

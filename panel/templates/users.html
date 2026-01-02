@@ -1,0 +1,400 @@
+{% extends "base.html" %}
+
+{% block title %}مدیریت کاربران | OCServ Panel{% endblock %}
+
+{% block page_title %}مدیریت کاربران{% endblock %}
+
+{% block content %}
+<div class="users-page">
+    <!-- Header Actions -->
+    <div class="page-actions">
+        <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input type="text" id="search-input" placeholder="جستجوی کاربر..." oninput="debounceSearch()">
+        </div>
+
+        <div class="filter-group">
+            <select id="filter-status" onchange="loadUsers()">
+                <option value="">همه وضعیت‌ها</option>
+                <option value="active">فعال</option>
+                <option value="inactive">غیرفعال</option>
+            </select>
+
+            <select id="filter-online" onchange="loadUsers()">
+                <option value="">همه</option>
+                <option value="online">آنلاین</option>
+                <option value="offline">آفلاین</option>
+            </select>
+        </div>
+
+        <button class="btn btn-primary" onclick="showAddUserModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            کاربر جدید
+        </button>
+    </div>
+
+    <!-- Users Table -->
+    <div class="card">
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>کاربر</th>
+                        <th>وضعیت</th>
+                        <th>ترافیک</th>
+                        <th>انقضا</th>
+                        <th>اتصال</th>
+                        <th>عملیات</th>
+                    </tr>
+                </thead>
+                <tbody id="users-table-body">
+                    <tr>
+                        <td colspan="6" class="loading-cell">
+                            <div class="loading-spinner"></div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination" id="pagination"></div>
+    </div>
+</div>
+
+<!-- Add/Edit User Modal -->
+<div class="modal" id="user-modal">
+    <div class="modal-backdrop" onclick="closeModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modal-title">کاربر جدید</h3>
+            <button class="btn-icon" onclick="closeModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+            </button>
+        </div>
+        <form id="user-form" onsubmit="saveUser(event)">
+            <input type="hidden" id="user-id">
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="user-username">نام کاربری</label>
+                    <input type="text" id="user-username" required minlength="3" maxlength="50">
+                </div>
+
+                <div class="form-group">
+                    <label for="user-password">رمز عبور</label>
+                    <input type="text" id="user-password" minlength="4">
+                    <small class="form-hint">برای ویرایش، خالی بگذارید تا تغییر نکند</small>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="user-traffic">حداکثر ترافیک</label>
+                    <div class="input-with-unit">
+                        <input type="number" id="user-traffic" min="0" value="0">
+                        <select id="traffic-unit">
+                            <option value="1073741824">GB</option>
+                            <option value="1048576">MB</option>
+                        </select>
+                    </div>
+                    <small class="form-hint">۰ = نامحدود</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="user-expire">تاریخ انقضا</label>
+                    <input type="datetime-local" id="user-expire">
+                    <small class="form-hint">خالی = نامحدود</small>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="user-connections">حداکثر اتصال همزمان</label>
+                    <input type="number" id="user-connections" min="1" value="2">
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label toggle-label">
+                        <input type="checkbox" id="user-active" checked>
+                        <span class="toggle-switch"></span>
+                        فعال
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="user-note">یادداشت</label>
+                <textarea id="user-note" rows="2"></textarea>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">انصراف</button>
+                <button type="submit" class="btn btn-primary">ذخیره</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentPage = 1;
+    let searchTimeout = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        checkAuth();
+        loadUsers();
+    });
+
+    function debounceSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(loadUsers, 300);
+    }
+
+    async function loadUsers() {
+        const search = document.getElementById('search-input').value;
+        const statusFilter = document.getElementById('filter-status').value;
+        const onlineFilter = document.getElementById('filter-online').value;
+
+        let params = `page=${currentPage}&per_page=20`;
+        if (search) params += `&search=${encodeURIComponent(search)}`;
+        if (statusFilter === 'active') params += '&is_active=true';
+        if (statusFilter === 'inactive') params += '&is_active=false';
+        if (onlineFilter === 'online') params += '&is_online=true';
+        if (onlineFilter === 'offline') params += '&is_online=false';
+
+        try {
+            const data = await apiGet(`/api/users?${params}`);
+            renderUsersTable(data.users);
+            renderPagination(data);
+        } catch (error) {
+            console.error('Error loading users:', error);
+            showToast('خطا در دریافت لیست کاربران', 'error');
+        }
+    }
+
+    function renderUsersTable(users) {
+        const tbody = document.getElementById('users-table-body');
+
+        if (users.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">کاربری یافت نشد</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = users.map(user => `
+        <tr>
+            <td>
+                <div class="user-cell">
+                    <span class="user-avatar ${user.is_online ? 'online' : ''}">${user.username.charAt(0).toUpperCase()}</span>
+                    <div>
+                        <span class="user-name">${user.username}</span>
+                        ${user.note ? `<span class="user-note">${user.note}</span>` : ''}
+                    </div>
+                </div>
+            </td>
+            <td>
+                <span class="status-badge ${user.is_active ? 'active' : 'inactive'}">
+                    ${user.is_active ? 'فعال' : 'غیرفعال'}
+                </span>
+                ${user.is_online ? '<span class="status-badge online">آنلاین</span>' : ''}
+            </td>
+            <td>
+                <div class="traffic-cell">
+                    <div class="progress-bar">
+                        <div class="progress-fill ${user.traffic_percent > 80 ? 'warning' : ''} ${user.traffic_percent > 95 ? 'danger' : ''}" 
+                             style="width: ${Math.min(100, user.traffic_percent)}%"></div>
+                    </div>
+                    <span class="traffic-text">
+                        ${formatBytes(user.used_traffic)} / ${user.max_traffic > 0 ? formatBytes(user.max_traffic) : '∞'}
+                    </span>
+                </div>
+            </td>
+            <td>
+                ${user.expire_date ?
+                `<span class="${user.is_expired ? 'text-danger' : ''}">${formatDate(user.expire_date)}</span>` :
+                '<span class="text-muted">نامحدود</span>'
+            }
+            </td>
+            <td>
+                <span class="connection-count">${user.current_connections} / ${user.max_connections}</span>
+            </td>
+            <td>
+                <div class="action-buttons">
+                    <button class="btn-icon" onclick="editUser(${user.id})" title="ویرایش">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                    </button>
+                    ${user.is_online ? `
+                        <button class="btn-icon warning" onclick="disconnectUser(${user.id})" title="قطع اتصال">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    ` : ''}
+                    <button class="btn-icon danger" onclick="deleteUser(${user.id}, '${user.username}')" title="حذف">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+    }
+
+    function renderPagination(data) {
+        const container = document.getElementById('pagination');
+        if (data.pages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+
+        let html = '';
+
+        if (currentPage > 1) {
+            html += `<button class="page-btn" onclick="goToPage(${currentPage - 1})">قبلی</button>`;
+        }
+
+        for (let i = 1; i <= data.pages; i++) {
+            if (i === 1 || i === data.pages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+            } else if (i === currentPage - 3 || i === currentPage + 3) {
+                html += '<span class="page-ellipsis">...</span>';
+            }
+        }
+
+        if (currentPage < data.pages) {
+            html += `<button class="page-btn" onclick="goToPage(${currentPage + 1})">بعدی</button>`;
+        }
+
+        container.innerHTML = html;
+    }
+
+    function goToPage(page) {
+        currentPage = page;
+        loadUsers();
+    }
+
+    function showAddUserModal() {
+        document.getElementById('modal-title').textContent = 'کاربر جدید';
+        document.getElementById('user-form').reset();
+        document.getElementById('user-id').value = '';
+        document.getElementById('user-username').disabled = false;
+        document.getElementById('user-password').required = true;
+        document.getElementById('user-active').checked = true;
+        document.getElementById('user-modal').classList.add('active');
+    }
+
+    async function editUser(id) {
+        try {
+            const user = await apiGet(`/api/users/${id}`);
+
+            document.getElementById('modal-title').textContent = 'ویرایش کاربر';
+            document.getElementById('user-id').value = user.id;
+            document.getElementById('user-username').value = user.username;
+            document.getElementById('user-username').disabled = true;
+            document.getElementById('user-password').value = '';
+            document.getElementById('user-password').required = false;
+
+            // Convert traffic to GB
+            const trafficGB = user.max_traffic / 1073741824;
+            document.getElementById('user-traffic').value = trafficGB;
+            document.getElementById('traffic-unit').value = '1073741824';
+
+            if (user.expire_date) {
+                const date = new Date(user.expire_date);
+                document.getElementById('user-expire').value = date.toISOString().slice(0, 16);
+            } else {
+                document.getElementById('user-expire').value = '';
+            }
+
+            document.getElementById('user-connections').value = user.max_connections;
+            document.getElementById('user-active').checked = user.is_active;
+            document.getElementById('user-note').value = user.note || '';
+
+            document.getElementById('user-modal').classList.add('active');
+        } catch (error) {
+            showToast('خطا در دریافت اطلاعات کاربر', 'error');
+        }
+    }
+
+    async function saveUser(event) {
+        event.preventDefault();
+
+        const id = document.getElementById('user-id').value;
+        const trafficValue = parseFloat(document.getElementById('user-traffic').value) || 0;
+        const trafficUnit = parseInt(document.getElementById('traffic-unit').value);
+
+        const data = {
+            username: document.getElementById('user-username').value,
+            max_traffic: Math.floor(trafficValue * trafficUnit),
+            max_connections: parseInt(document.getElementById('user-connections').value),
+            is_active: document.getElementById('user-active').checked,
+            note: document.getElementById('user-note').value || null
+        };
+
+        const password = document.getElementById('user-password').value;
+        if (password) data.password = password;
+
+        const expireDate = document.getElementById('user-expire').value;
+        if (expireDate) {
+            data.expire_date = new Date(expireDate).toISOString();
+        }
+
+        try {
+            if (id) {
+                await apiPut(`/api/users/${id}`, data);
+                showToast('کاربر با موفقیت ویرایش شد', 'success');
+            } else {
+                await apiPost('/api/users', data);
+                showToast('کاربر با موفقیت ایجاد شد', 'success');
+            }
+
+            closeModal();
+            loadUsers();
+        } catch (error) {
+            showToast(error.message || 'خطا در ذخیره کاربر', 'error');
+        }
+    }
+
+    async function deleteUser(id, username) {
+        if (!confirm(`آیا از حذف کاربر "${username}" مطمئن هستید؟`)) return;
+
+        try {
+            await apiDelete(`/api/users/${id}`);
+            showToast('کاربر با موفقیت حذف شد', 'success');
+            loadUsers();
+        } catch (error) {
+            showToast('خطا در حذف کاربر', 'error');
+        }
+    }
+
+    async function disconnectUser(id) {
+        try {
+            await apiPost(`/api/users/${id}/disconnect`);
+            showToast('اتصال کاربر قطع شد', 'success');
+            loadUsers();
+        } catch (error) {
+            showToast('خطا در قطع اتصال', 'error');
+        }
+    }
+
+    function closeModal() {
+        document.getElementById('user-modal').classList.remove('active');
+    }
+</script>
+{% endblock %}

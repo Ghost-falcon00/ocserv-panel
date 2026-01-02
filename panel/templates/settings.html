@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+
+{% block title %}تنظیمات | OCServ Panel{% endblock %}
+
+{% block page_title %}تنظیمات{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+    <!-- Server Control -->
+    <div class="card">
+        <div class="card-header">
+            <h3>کنترل سرور</h3>
+        </div>
+        <div class="card-body">
+            <div class="server-controls">
+                <div class="server-status-big" id="server-status-big">
+                    <div class="status-indicator">
+                        <span class="status-dot"></span>
+                        <span class="status-text">در حال بررسی...</span>
+                    </div>
+                </div>
+
+                <div class="control-buttons">
+                    <button class="btn btn-success" onclick="startServer()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                        شروع
+                    </button>
+                    <button class="btn btn-warning" onclick="restartServer()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                        </svg>
+                        راه‌اندازی مجدد
+                    </button>
+                    <button class="btn btn-danger" onclick="stopServer()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="6" y="6" width="12" height="12" />
+                        </svg>
+                        توقف
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Categories -->
+    <div class="settings-tabs">
+        <button class="tab-btn active" data-category="network">شبکه</button>
+        <button class="tab-btn" data-category="connection">اتصال</button>
+        <button class="tab-btn" data-category="security">امنیت</button>
+        <button class="tab-btn" data-category="performance">عملکرد</button>
+    </div>
+
+    <!-- Settings Form -->
+    <div class="card">
+        <div class="card-header">
+            <h3>تنظیمات <span id="category-title">شبکه</span></h3>
+            <button class="btn btn-primary" onclick="applySettings()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="20 6 9 17 4 12" />
+                </svg>
+                اعمال تغییرات
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="settings-form" id="settings-form">
+                <div class="loading-spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel Settings -->
+    <div class="card">
+        <div class="card-header">
+            <h3>تنظیمات پنل</h3>
+        </div>
+        <div class="card-body">
+            <form id="panel-settings-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>تم پنل</label>
+                        <select id="panel-theme" onchange="setTheme(this.value)">
+                            <option value="dark">تیره</option>
+                            <option value="light">روشن</option>
+                            <option value="auto">خودکار</option>
+                        </select>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentCategory = 'network';
+    let settings = {};
+
+    const categoryTitles = {
+        'network': 'شبکه',
+        'connection': 'اتصال',
+        'security': 'امنیت',
+        'performance': 'عملکرد'
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        checkAuth();
+        loadServerStatus();
+        loadSettings();
+        setupTabs();
+
+        // Load saved theme preference
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        document.getElementById('panel-theme').value = savedTheme;
+    });
+
+    function setupTabs() {
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentCategory = btn.dataset.category;
+                document.getElementById('category-title').textContent = categoryTitles[currentCategory];
+                renderSettings();
+            });
+        });
+    }
+
+    async function loadServerStatus() {
+        try {
+            const status = await apiGet('/api/dashboard/server-status');
+            const container = document.getElementById('server-status-big');
+
+            container.innerHTML = `
+            <div class="status-indicator ${status.online ? 'online' : 'offline'}">
+                <span class="status-dot ${status.online ? 'pulse' : ''}"></span>
+                <span class="status-text">${status.online ? 'در حال اجرا' : 'متوقف'}</span>
+            </div>
+            ${status.version ? `<span class="version-text">نسخه: ${status.version}</span>` : ''}
+        `;
+        } catch (error) {
+            console.error('Error loading server status:', error);
+        }
+    }
+
+    async function loadSettings() {
+        try {
+            const data = await apiGet('/api/settings');
+            settings = data.settings;
+            renderSettings();
+        } catch (error) {
+            console.error('Error loading settings:', error);
+            showToast('خطا در دریافت تنظیمات', 'error');
+        }
+    }
+
+    function renderSettings() {
+        const container = document.getElementById('settings-form');
+
+        const categorySettings = Object.entries(settings)
+            .filter(([key, setting]) => setting.category === currentCategory);
+
+        if (categorySettings.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>تنظیماتی یافت نشد</p></div>';
+            return;
+        }
+
+        container.innerHTML = categorySettings.map(([key, setting]) => `
+        <div class="setting-item">
+            <div class="setting-info">
+                <label for="setting-${key}">${key}</label>
+                <p class="setting-description">${setting.description || ''}</p>
+            </div>
+            <div class="setting-input">
+                ${renderSettingInput(key, setting)}
+            </div>
+        </div>
+    `).join('');
+    }
+
+    function renderSettingInput(key, setting) {
+        const value = setting.value;
+
+        // Boolean settings
+        if (value === 'true' || value === 'false') {
+            return `
+            <label class="toggle-label">
+                <input type="checkbox" id="setting-${key}" 
+                       ${value === 'true' ? 'checked' : ''} 
+                       onchange="updateSetting('${key}', this.checked ? 'true' : 'false')">
+                <span class="toggle-switch"></span>
+            </label>
+        `;
+        }
+
+        // Numeric settings
+        if (/^\d+$/.test(value)) {
+            return `<input type="number" id="setting-${key}" value="${value}" 
+                       onchange="updateSetting('${key}', this.value)">`;
+        }
+
+        // Text settings
+        return `<input type="text" id="setting-${key}" value="${value}" 
+                   onchange="updateSetting('${key}', this.value)">`;
+    }
+
+    async function updateSetting(key, value) {
+        try {
+            await apiPut(`/api/settings/${key}`, { value });
+            settings[key].value = value;
+            showToast('تنظیم ذخیره شد', 'success');
+        } catch (error) {
+            showToast('خطا در ذخیره تنظیم', 'error');
+        }
+    }
+
+    async function applySettings() {
+        try {
+            await apiPost('/api/settings/apply');
+            showToast('تنظیمات اعمال شد', 'success');
+            loadServerStatus();
+        } catch (error) {
+            showToast('خطا در اعمال تنظیمات', 'error');
+        }
+    }
+
+    async function startServer() {
+        if (!confirm('آیا از شروع سرور مطمئن هستید؟')) return;
+
+        try {
+            await apiPost('/api/settings/server/start');
+            showToast('سرور شروع به کار کرد', 'success');
+            loadServerStatus();
+        } catch (error) {
+            showToast('خطا در شروع سرور', 'error');
+        }
+    }
+
+    async function restartServer() {
+        if (!confirm('آیا از راه‌اندازی مجدد سرور مطمئن هستید؟ تمام کاربران قطع خواهند شد.')) return;
+
+        try {
+            await apiPost('/api/settings/server/restart');
+            showToast('سرور با موفقیت راه‌اندازی مجدد شد', 'success');
+            setTimeout(loadServerStatus, 2000);
+        } catch (error) {
+            showToast('خطا در راه‌اندازی مجدد', 'error');
+        }
+    }
+
+    async function stopServer() {
+        if (!confirm('آیا از توقف سرور مطمئن هستید؟ تمام کاربران قطع خواهند شد.')) return;
+
+        try {
+            await apiPost('/api/settings/server/stop');
+            showToast('سرور متوقف شد', 'warning');
+            loadServerStatus();
+        } catch (error) {
+            showToast('خطا در توقف سرور', 'error');
+        }
+    }
+
+    function setTheme(theme) {
+        localStorage.setItem('theme', theme);
+        applyTheme(theme);
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+
+{% block title %}داشبورد | OCServ Panel{% endblock %}
+
+{% block page_title %}داشبورد{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon users">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value" id="total-users">-</span>
+                <span class="stat-label">کل کاربران</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon online">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value" id="online-users">-</span>
+                <span class="stat-label">آنلاین</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon traffic">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value" id="today-traffic">-</span>
+                <span class="stat-label">ترافیک امروز</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon connections">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                    <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value" id="today-connections">-</span>
+                <span class="stat-label">اتصالات امروز</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="dashboard-grid">
+        <!-- Traffic Chart -->
+        <div class="card chart-card">
+            <div class="card-header">
+                <h3>نمودار ترافیک</h3>
+                <select id="chart-days" class="select-mini">
+                    <option value="7">۷ روز</option>
+                    <option value="14">۱۴ روز</option>
+                    <option value="30">۳۰ روز</option>
+                </select>
+            </div>
+            <div class="card-body">
+                <canvas id="traffic-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Online Users -->
+        <div class="card">
+            <div class="card-header">
+                <h3>کاربران آنلاین</h3>
+                <button class="btn-icon" onclick="refreshOnlineUsers()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                    </svg>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="online-users-list" id="online-users-list">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="12" y1="8" x2="12" y2="12" />
+                            <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <p>هیچ کاربری آنلاین نیست</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts -->
+        <div class="card alerts-card">
+            <div class="card-header">
+                <h3>هشدارها</h3>
+                <span class="badge" id="alerts-count">0</span>
+            </div>
+            <div class="card-body">
+                <div class="alerts-list" id="alerts-list">
+                    <div class="empty-state small">
+                        <p>هشداری وجود ندارد</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Connections -->
+        <div class="card">
+            <div class="card-header">
+                <h3>آخرین اتصالات</h3>
+                <a href="/logs" class="btn-link">مشاهده همه</a>
+            </div>
+            <div class="card-body">
+                <div class="recent-list" id="recent-connections">
+                    <div class="loading-spinner"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+    let trafficChart = null;
+
+    // Initialize dashboard
+    document.addEventListener('DOMContentLoaded', () => {
+        checkAuth();
+        loadDashboard();
+
+        // Auto refresh every 30 seconds
+        setInterval(loadDashboard, 30000);
+
+        // Chart days change
+        document.getElementById('chart-days').addEventListener('change', loadTrafficChart);
+    });
+
+    async function loadDashboard() {
+        await Promise.all([
+            loadStats(),
+            loadOnlineUsers(),
+            loadAlerts(),
+            loadRecentConnections(),
+            loadTrafficChart()
+        ]);
+    }
+
+    async function loadStats() {
+        try {
+            const data = await apiGet('/api/dashboard/stats');
+
+            document.getElementById('total-users').textContent = data.total_users;
+            document.getElementById('online-users').textContent = data.online_users;
+            document.getElementById('today-traffic').textContent = formatBytes(data.today_traffic);
+            document.getElementById('today-connections').textContent = data.today_connections;
+        } catch (error) {
+            console.error('Error loading stats:', error);
+        }
+    }
+
+    async function loadOnlineUsers() {
+        try {
+            const users = await apiGet('/api/dashboard/online-users');
+            const container = document.getElementById('online-users-list');
+
+            if (users.length === 0) {
+                container.innerHTML = `
+                <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <p>هیچ کاربری آنلاین نیست</p>
+                </div>
+            `;
+                return;
+            }
+
+            container.innerHTML = users.map(user => `
+            <div class="online-user-item">
+                <div class="user-info">
+                    <span class="user-avatar">${user.username.charAt(0).toUpperCase()}</span>
+                    <div>
+                        <span class="user-name">${user.username}</span>
+                        <span class="user-ip">${user.client_ip}</span>
+                    </div>
+                </div>
+                <button class="btn-icon danger" onclick="disconnectUser('${user.username}')" title="قطع اتصال">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+        `).join('');
+        } catch (error) {
+            console.error('Error loading online users:', error);
+        }
+    }
+
+    async function loadAlerts() {
+        try {
+            const alerts = await apiGet('/api/dashboard/alerts');
+            const container = document.getElementById('alerts-list');
+            const countBadge = document.getElementById('alerts-count');
+
+            countBadge.textContent = alerts.length;
+            countBadge.style.display = alerts.length > 0 ? 'inline-flex' : 'none';
+
+            if (alerts.length === 0) {
+                container.innerHTML = `
+                <div class="empty-state small">
+                    <p>هشداری وجود ندارد</p>
+                </div>
+            `;
+                return;
+            }
+
+            container.innerHTML = alerts.map(alert => `
+            <div class="alert-item ${alert.severity}">
+                <div class="alert-icon">
+                    ${alert.type === 'traffic' ?
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>' :
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+                }
+                </div>
+                <div class="alert-content">
+                    <span class="alert-user">${alert.username}</span>
+                    <span class="alert-message">${alert.message}</span>
+                </div>
+            </div>
+        `).join('');
+        } catch (error) {
+            console.error('Error loading alerts:', error);
+        }
+    }
+
+    async function loadRecentConnections() {
+        try {
+            const connections = await apiGet('/api/dashboard/recent-connections?limit=5');
+            const container = document.getElementById('recent-connections');
+
+            if (connections.length === 0) {
+                container.innerHTML = '<div class="empty-state small"><p>اتصالی ثبت نشده</p></div>';
+                return;
+            }
+
+            container.innerHTML = connections.map(conn => `
+            <div class="recent-item">
+                <div class="recent-user">
+                    <span class="status-dot ${conn.status}"></span>
+                    <span>${conn.username}</span>
+                </div>
+                <div class="recent-meta">
+                    <span>${conn.client_ip || '-'}</span>
+                    <span>${formatDate(conn.connected_at)}</span>
+                </div>
+            </div>
+        `).join('');
+        } catch (error) {
+            console.error('Error loading recent connections:', error);
+        }
+    }
+
+    async function loadTrafficChart() {
+        const days = document.getElementById('chart-days').value;
+
+        try {
+            const data = await apiGet(`/api/dashboard/traffic-chart?days=${days}`);
+
+            const ctx = document.getElementById('traffic-chart').getContext('2d');
+
+            if (trafficChart) {
+                trafficChart.destroy();
+            }
+
+            trafficChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.labels,
+                    datasets: [
+                        {
+                            label: 'دانلود',
+                            data: data.traffic_in.map(b => b / (1024 * 1024 * 1024)), // Convert to GB
+                            borderColor: '#6366f1',
+                            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'آپلود',
+                            data: data.traffic_out.map(b => b / (1024 * 1024 * 1024)), // Convert to GB
+                            borderColor: '#8b5cf6',
+                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            rtl: true,
+                            labels: {
+                                font: { family: 'Vazirmatn' }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: value => value.toFixed(2) + ' GB'
+                            }
+                        }
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error loading chart:', error);
+        }
+    }
+
+    async function refreshOnlineUsers() {
+        await loadOnlineUsers();
+        showToast('لیست آنلاین به‌روز شد', 'success');
+    }
+
+    async function disconnectUser(username) {
+        if (!confirm(`آیا از قطع اتصال ${username} مطمئن هستید؟`)) return;
+
+        try {
+            // Find user ID first
+            const users = await apiGet(`/api/users?search=${username}`);
+            if (users.users.length > 0) {
+                await apiPost(`/api/users/${users.users[0].id}/disconnect`);
+                showToast(`اتصال ${username} قطع شد`, 'success');
+                loadOnlineUsers();
+            }
+        } catch (error) {
+            showToast('خطا در قطع اتصال', 'error');
+        }
+    }
+</script>
+{% endblock %}

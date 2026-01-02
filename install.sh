@@ -1,0 +1,735 @@
+#!/bin/bash
+
+#############################################################
+#                                                           #
+#   OCServ Panel - One-Click Installer                      #
+#   اسکریپت نصب یک‌کلیکی پنل مدیریت OCServ                   #
+#                                                           #
+#   https://github.com/Ghost-falcon00/ocserv-panel          #
+#                                                           #
+#############################################################
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Variables
+PANEL_DIR="/opt/ocserv-panel"
+OCSERV_PORT=4443
+GITHUB_RAW="https://raw.githubusercontent.com/Ghost-falcon00/ocserv-panel/main"
+
+# Functions
+print_banner() {
+    clear
+    echo -e "${PURPLE}"
+    echo "╔═══════════════════════════════════════════════════════════╗"
+    echo "║                                                           ║"
+    echo "║   ██████╗  ██████╗███████╗███████╗██████╗ ██╗   ██╗      ║"
+    echo "║  ██╔═══██╗██╔════╝██╔════╝██╔════╝██╔══██╗██║   ██║      ║"
+    echo "║  ██║   ██║██║     ███████╗█████╗  ██████╔╝██║   ██║      ║"
+    echo "║  ██║   ██║██║     ╚════██║██╔══╝  ██╔══██╗╚██╗ ██╔╝      ║"
+    echo "║  ╚██████╔╝╚██████╗███████║███████╗██║  ██║ ╚████╔╝       ║"
+    echo "║   ╚═════╝  ╚═════╝╚══════╝╚══════╝╚═╝  ╚═╝  ╚═══╝        ║"
+    echo "║                                                           ║"
+    echo "║               OCServ Management Panel                     ║"
+    echo "║                   نسخه بهینه ایران                        ║"
+    echo "║                                                           ║"
+    echo "╚═══════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[✓]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[!]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[✗]${NC} $1"
+}
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        log_error "This script must be run as root"
+        exit 1
+    fi
+}
+
+check_os() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        OS=$ID
+        VERSION=$VERSION_ID
+    else
+        log_error "Cannot detect OS"
+        exit 1
+    fi
+    
+    if [[ "$OS" != "ubuntu" && "$OS" != "debian" ]]; then
+        log_error "This script only supports Ubuntu and Debian"
+        exit 1
+    fi
+    
+    log_info "Detected: $OS $VERSION"
+}
+
+get_public_ip() {
+    PUBLIC_IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me || curl -s https://icanhazip.com)
+    log_info "Public IP: $PUBLIC_IP"
+}
+
+find_free_port() {
+    # Find a free port starting from 8443
+    local port=8443
+    while netstat -tuln 2>/dev/null | grep -q ":$port " || ss -tuln 2>/dev/null | grep -q ":$port "; do
+        port=$((port + 1))
+    done
+    echo $port
+}
+
+generate_random_string() {
+    # Generate random string for panel URL path
+    cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w ${1:-16} | head -n 1
+}
+
+get_user_input() {
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}                    تنظیمات اولیه                          ${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    
+    # Domain
+    while [[ -z "$DOMAIN" ]]; do
+        read -p "$(echo -e ${YELLOW}Enter your domain \(required\): ${NC})" DOMAIN
+        if [[ -z "$DOMAIN" ]]; then
+            log_error "Domain is required for SSL certificate"
+        fi
+    done
+    
+    # Admin username
+    while [[ -z "$ADMIN_USER" ]]; do
+        read -p "$(echo -e ${YELLOW}Enter panel admin username: ${NC})" ADMIN_USER
+        if [[ -z "$ADMIN_USER" ]]; then
+            log_error "Username is required"
+        fi
+    done
+    
+    # Admin password
+    while [[ -z "$ADMIN_PASS" ]]; do
+        read -sp "$(echo -e ${YELLOW}Enter panel admin password: ${NC})" ADMIN_PASS
+        echo ""
+        if [[ ${#ADMIN_PASS} -lt 6 ]]; then
+            log_error "Password must be at least 6 characters"
+            ADMIN_PASS=""
+        fi
+    done
+    
+    # Confirm password
+    read -sp "$(echo -e ${YELLOW}Confirm password: ${NC})" ADMIN_PASS_CONFIRM
+    echo ""
+    
+    if [[ "$ADMIN_PASS" != "$ADMIN_PASS_CONFIRM" ]]; then
+        log_error "Passwords do not match"
+        exit 1
+    fi
+    
+    # Find free port for panel
+    PANEL_PORT=$(find_free_port)
+    
+    # Generate random path for extra security
+    PANEL_PATH=$(generate_random_string 12)
+    
+    echo ""
+    log_info "Domain: $DOMAIN"
+    log_info "Admin: $ADMIN_USER"
+    log_info "Panel Port: $PANEL_PORT"
+    log_info "Panel Secret Path: /$PANEL_PATH"
+    echo ""
+    
+    read -p "$(echo -e ${YELLOW}Continue with these settings? \[Y/n\]: ${NC})" CONFIRM
+    if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
+        log_warning "Installation cancelled"
+        exit 0
+    fi
+}
+
+install_dependencies() {
+    log_info "Installing dependencies..."
+    
+    apt-get update -qq
+    apt-get install -y -qq \
+        curl \
+        wget \
+        git \
+        python3 \
+        python3-pip \
+        python3-venv \
+        certbot \
+        ocserv \
+        gnutls-bin \
+        net-tools \
+        > /dev/null 2>&1
+    
+    log_success "Dependencies installed"
+}
+
+setup_ssl() {
+    log_info "Obtaining SSL certificate for $DOMAIN..."
+    
+    # Stop services that might use port 80
+    systemctl stop nginx 2>/dev/null || true
+    systemctl stop apache2 2>/dev/null || true
+    systemctl stop ocserv 2>/dev/null || true
+    
+    # Get certificate
+    certbot certonly --standalone --non-interactive --agree-tos \
+        --email admin@$DOMAIN \
+        -d $DOMAIN \
+        --preferred-challenges http
+    
+    if [[ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+        log_error "Failed to obtain SSL certificate"
+        exit 1
+    fi
+    
+    log_success "SSL certificate obtained"
+    
+    # Setup auto-renewal with ocserv reload
+    cat > /etc/cron.d/certbot-ocserv << EOF
+0 0 1 * * root certbot renew --quiet --deploy-hook "systemctl reload ocserv && systemctl restart ocserv-panel"
+EOF
+}
+
+configure_ocserv() {
+    log_info "Configuring OCServ with Iran-optimized settings..."
+    
+    # Backup original config
+    if [[ -f /etc/ocserv/ocserv.conf ]]; then
+        cp /etc/ocserv/ocserv.conf /etc/ocserv/ocserv.conf.backup.$(date +%Y%m%d)
+    fi
+    
+    # Create optimized config for Iran
+    cat > /etc/ocserv/ocserv.conf << EOF
+# OCServ Configuration - Optimized for Iran
+# Generated by OCServ Panel Installer
+
+# Authentication
+auth = "plain[passwd=/etc/ocserv/ocpasswd]"
+tcp-port = ${OCSERV_PORT}
+udp-port = ${OCSERV_PORT}
+
+# Performance & Security
+run-as-user = nobody
+run-as-group = daemon
+socket-file = /run/ocserv.socket
+isolate-workers = true
+
+# SSL Certificate
+server-cert = /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
+server-key = /etc/letsencrypt/live/${DOMAIN}/privkey.pem
+
+# Connection Limits
+max-clients = 128
+max-same-clients = 4
+
+# Timeouts optimized for Iran filtering
+keepalive = 32400
+dpd = 90
+mobile-dpd = 1800
+switch-to-tcp-timeout = 25
+
+# MTU optimization for better speed
+try-mtu-discovery = true
+mtu = 1400
+
+# TLS optimization
+tls-priorities = "PERFORMANCE:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0"
+auth-timeout = 240
+idle-timeout = 1200
+mobile-idle-timeout = 2400
+min-reauth-time = 300
+rekey-time = 172800
+rekey-method = ssl
+
+# Security
+max-ban-score = 80
+ban-reset-time = 1200
+cookie-timeout = 300
+deny-roaming = false
+
+# System
+use-occtl = true
+pid-file = /run/ocserv.pid
+server-stats-reset-time = 604800
+
+# Network
+device = vpns
+predictable-ips = true
+default-domain = ${DOMAIN}
+ipv4-network = 192.168.100.0
+ipv4-netmask = 255.255.255.0
+
+# DNS - Best DNS for Iran
+dns = 1.1.1.1
+dns = 1.0.0.1
+dns = 8.8.8.8
+dns = 8.8.4.4
+
+# Routing - Only filtered traffic goes through VPN
+tunnel-all-dns = true
+no-route = 192.168.0.0/255.255.0.0
+no-route = 172.16.0.0/255.240.0.0
+no-route = 10.0.0.0/255.0.0.0
+
+# Iranian sites bypass VPN (faster access)
+no-route = 2.144.0.0/255.254.0.0
+no-route = 5.22.0.0/255.255.0.0
+no-route = 5.23.0.0/255.255.0.0
+no-route = 5.52.0.0/255.252.0.0
+no-route = 5.56.0.0/255.248.0.0
+no-route = 5.74.0.0/255.254.0.0
+no-route = 5.106.0.0/255.255.0.0
+no-route = 5.112.0.0/255.248.0.0
+no-route = 5.120.0.0/255.248.0.0
+no-route = 5.144.0.0/255.240.0.0
+no-route = 5.160.0.0/255.224.0.0
+no-route = 5.190.0.0/255.254.0.0
+no-route = 5.198.0.0/255.254.0.0
+no-route = 5.200.0.0/255.248.0.0
+no-route = 31.2.0.0/255.254.0.0
+no-route = 31.7.64.0/255.255.192.0
+no-route = 31.14.0.0/255.254.0.0
+no-route = 31.24.0.0/255.248.0.0
+no-route = 31.40.0.0/255.248.0.0
+no-route = 31.56.0.0/255.248.0.0
+no-route = 31.130.0.0/255.254.0.0
+no-route = 31.170.0.0/255.254.0.0
+no-route = 31.193.192.0/255.255.192.0
+no-route = 37.9.0.0/255.255.0.0
+no-route = 37.32.0.0/255.224.0.0
+no-route = 37.63.0.0/255.255.0.0
+no-route = 37.75.0.0/255.255.0.0
+no-route = 37.98.0.0/255.254.0.0
+no-route = 37.114.0.0/255.254.0.0
+no-route = 37.129.0.0/255.255.0.0
+no-route = 37.143.0.0/255.255.0.0
+no-route = 37.152.0.0/255.248.0.0
+no-route = 37.191.0.0/255.255.0.0
+no-route = 37.202.0.0/255.254.0.0
+no-route = 37.228.0.0/255.252.0.0
+no-route = 37.235.0.0/255.255.0.0
+
+ping-leases = false
+
+# Cisco compatibility for Iran
+cisco-client-compat = true
+dtls-legacy = true
+
+# Compression (can help with speed)
+compression = true
+no-compress-limit = 256
+
+# Output buffer for better performance
+output-buffer = 23000
+EOF
+
+    # Create password file
+    touch /etc/ocserv/ocpasswd
+    chmod 600 /etc/ocserv/ocpasswd
+    
+    log_success "OCServ configured with Iran-optimized settings"
+}
+
+setup_panel() {
+    log_info "Installing OCServ Panel..."
+    
+    # Create panel directory
+    mkdir -p $PANEL_DIR
+    cd $PANEL_DIR
+    
+    # Clone from GitHub
+    git clone --depth 1 https://github.com/Ghost-falcon00/ocserv-panel.git .
+    
+    # Create virtual environment
+    python3 -m venv venv
+    source venv/bin/activate
+    
+    # Install Python dependencies
+    pip install -q --upgrade pip
+    pip install -q -r panel/requirements.txt
+    
+    # Create .env file with settings
+    cat > panel/.env << EOF
+SECRET_KEY=$(generate_random_string 32)
+PANEL_PORT=${PANEL_PORT}
+PANEL_PATH=${PANEL_PATH}
+ADMIN_USER=${ADMIN_USER}
+DOMAIN=${DOMAIN}
+EOF
+    
+    # Create data directory
+    mkdir -p panel/data
+    
+    log_success "Panel installed"
+}
+
+create_admin_user() {
+    log_info "Creating admin user..."
+    
+    cd $PANEL_DIR
+    source venv/bin/activate
+    
+    # Create Python script to add admin
+    python3 << EOF
+import asyncio
+import sys
+sys.path.insert(0, 'panel')
+
+from models.database import init_db, async_session
+from models.admin import Admin
+
+async def create_admin():
+    await init_db()
+    async with async_session() as session:
+        admin = Admin(
+            username="${ADMIN_USER}",
+            password_hash=Admin.hash_password("${ADMIN_PASS}"),
+            is_superadmin=True
+        )
+        session.add(admin)
+        await session.commit()
+
+asyncio.run(create_admin())
+EOF
+
+    log_success "Admin user created"
+}
+
+create_systemd_service() {
+    log_info "Creating systemd service..."
+    
+    cat > /etc/systemd/system/ocserv-panel.service << EOF
+[Unit]
+Description=OCServ Management Panel
+After=network.target ocserv.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${PANEL_DIR}/panel
+Environment="PATH=${PANEL_DIR}/venv/bin:\$PATH"
+ExecStart=${PANEL_DIR}/venv/bin/uvicorn app:app --host 0.0.0.0 --port ${PANEL_PORT} --workers 1
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable ocserv-panel
+    
+    log_success "Systemd service created"
+}
+
+optimize_vps_network() {
+    log_info "Optimizing VPS network for maximum performance..."
+    
+    # ═══════════════════════════════════════════════════════════
+    # TCP BBR + Advanced Network Optimization
+    # ═══════════════════════════════════════════════════════════
+    
+    cat > /etc/sysctl.d/99-ocserv-optimized.conf << 'EOF'
+# ╔═══════════════════════════════════════════════════════════╗
+# ║      OCServ Panel - VPS Network Optimization              ║
+# ║      بهینه‌سازی شبکه برای حداکثر سرعت و پایداری            ║
+# ╚═══════════════════════════════════════════════════════════╝
+
+# ═══════════════════════════════════════════════════════════
+# IP Forwarding - ضروری برای VPN
+# ═══════════════════════════════════════════════════════════
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+
+# ═══════════════════════════════════════════════════════════
+# TCP BBR Congestion Control - بهترین الگوریتم برای سرعت
+# ═══════════════════════════════════════════════════════════
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+# ═══════════════════════════════════════════════════════════
+# TCP Buffer Optimization - افزایش سرعت انتقال
+# ═══════════════════════════════════════════════════════════
+# افزایش بافر دریافت
+net.core.rmem_default = 1048576
+net.core.rmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 1048576 16777216
+
+# افزایش بافر ارسال
+net.core.wmem_default = 1048576
+net.core.wmem_max = 16777216
+net.ipv4.tcp_wmem = 4096 1048576 16777216
+
+# بافر عمومی
+net.core.optmem_max = 65535
+net.core.netdev_max_backlog = 65536
+
+# ═══════════════════════════════════════════════════════════
+# TCP Performance Tuning - بهینه‌سازی عملکرد TCP
+# ═══════════════════════════════════════════════════════════
+# فعال کردن TCP Fast Open - اتصال سریع‌تر
+net.ipv4.tcp_fastopen = 3
+
+# Window Scaling - پنجره بزرگ‌تر = سرعت بیشتر
+net.ipv4.tcp_window_scaling = 1
+
+# افزایش محدودیت اتصالات
+net.ipv4.tcp_max_syn_backlog = 65536
+net.core.somaxconn = 65535
+
+# کاهش زمان انتظار اتصالات
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_tw_reuse = 1
+
+# Keepalive بهینه
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 60
+net.ipv4.tcp_keepalive_probes = 5
+
+# غیرفعال کردن Timestamps (کاهش فیلترینگ)
+net.ipv4.tcp_timestamps = 0
+
+# غیرفعال کردن SACK (برخی فیلترها ازش استفاده میکنن)
+net.ipv4.tcp_sack = 0
+
+# MTU Probing - کشف بهترین MTU
+net.ipv4.tcp_mtu_probing = 1
+
+# ═══════════════════════════════════════════════════════════
+# Anti-Filtering Settings - ضد فیلترینگ
+# ═══════════════════════════════════════════════════════════
+# غیرفعال کردن ECN (فیلترها ازش استفاده میکنن)
+net.ipv4.tcp_ecn = 0
+
+# افزایش تنوع پورت منبع
+net.ipv4.ip_local_port_range = 1024 65535
+
+# ═══════════════════════════════════════════════════════════
+# Security Hardening - امنیت
+# ═══════════════════════════════════════════════════════════
+# محافظت در برابر SYN Flood
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_orphans = 65536
+
+# جلوگیری از IP Spoofing
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# غیرفعال کردن ICMP Redirect (امنیت بالاتر)
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# ═══════════════════════════════════════════════════════════
+# Memory Optimization - بهینه‌سازی حافظه
+# ═══════════════════════════════════════════════════════════
+net.ipv4.tcp_mem = 786432 1048576 1572864
+net.ipv4.udp_mem = 786432 1048576 1572864
+
+# ═══════════════════════════════════════════════════════════
+# Connection Tracking - برای NAT بهتر
+# ═══════════════════════════════════════════════════════════
+net.netfilter.nf_conntrack_max = 1048576
+net.nf_conntrack_max = 1048576
+
+# VFS Cache
+vm.swappiness = 10
+vm.dirty_ratio = 60
+vm.dirty_background_ratio = 5
+EOF
+
+    # اعمال تنظیمات
+    sysctl -p /etc/sysctl.d/99-ocserv-optimized.conf > /dev/null 2>&1 || true
+    
+    log_success "VPS network optimized with BBR + advanced settings"
+}
+
+setup_firewall() {
+    log_info "Configuring firewall and iptables..."
+    
+    # Get default interface
+    DEFAULT_IF=$(ip route | grep default | awk '{print $5}' | head -1)
+    
+    # Clear existing rules for ocserv
+    iptables -t nat -D POSTROUTING -o $DEFAULT_IF -j MASQUERADE 2>/dev/null || true
+    
+    # Configure NAT
+    iptables -t nat -A POSTROUTING -o $DEFAULT_IF -j MASQUERADE
+    
+    # Allow forwarding
+    iptables -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+    iptables -A FORWARD -s 192.168.100.0/24 -j ACCEPT
+    
+    # MSS Clamping - جلوگیری از مشکلات MTU
+    iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    
+    # Save iptables rules
+    if command -v netfilter-persistent &> /dev/null; then
+        netfilter-persistent save > /dev/null 2>&1
+    else
+        apt-get install -y -qq iptables-persistent > /dev/null 2>&1
+        netfilter-persistent save > /dev/null 2>&1
+    fi
+    
+    # Open ports with ufw if available
+    if command -v ufw &> /dev/null; then
+        ufw allow ${OCSERV_PORT}/tcp > /dev/null 2>&1
+        ufw allow ${OCSERV_PORT}/udp > /dev/null 2>&1
+        ufw allow ${PANEL_PORT}/tcp > /dev/null 2>&1
+        ufw allow 80/tcp > /dev/null 2>&1
+        ufw allow 443/tcp > /dev/null 2>&1
+    fi
+    
+    log_success "Firewall configured"
+}
+
+start_services() {
+    log_info "Starting services..."
+    
+    systemctl restart ocserv
+    systemctl start ocserv-panel
+    
+    sleep 3
+    
+    if systemctl is-active --quiet ocserv; then
+        log_success "OCServ is running"
+    else
+        log_error "OCServ failed to start"
+        journalctl -u ocserv -n 10 --no-pager
+    fi
+    
+    if systemctl is-active --quiet ocserv-panel; then
+        log_success "OCServ Panel is running"
+    else
+        log_error "OCServ Panel failed to start"
+        journalctl -u ocserv-panel -n 10 --no-pager
+    fi
+}
+
+save_install_info() {
+    # Save installation info for reference
+    cat > /root/.ocserv-panel-info << EOF
+Domain: ${DOMAIN}
+Panel URL: https://${DOMAIN}:${PANEL_PORT}
+Panel Secret Path: /${PANEL_PATH}
+Full Panel URL: https://${DOMAIN}:${PANEL_PORT}/${PANEL_PATH}
+Admin Username: ${ADMIN_USER}
+VPN Port: ${OCSERV_PORT}
+Installed: $(date)
+EOF
+    chmod 600 /root/.ocserv-panel-info
+}
+
+print_info() {
+    echo ""
+    echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║        🎉 Installation Completed Successfully! 🎉         ║${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}                      🌐 Panel Access                        ${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Panel URL:${NC}"
+    echo -e "  ${GREEN}https://${DOMAIN}:${PANEL_PORT}${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Admin Username:${NC} ${GREEN}${ADMIN_USER}${NC}"
+    echo -e "  ${YELLOW}Admin Password:${NC} ${GREEN}[your password]${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}                      🔐 VPN Server                         ${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Server:${NC} ${GREEN}${DOMAIN}${NC}"
+    echo -e "  ${YELLOW}Port:${NC}   ${GREEN}${OCSERV_PORT}${NC}"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}                      📋 Commands                           ${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Panel Logs:${NC}    journalctl -u ocserv-panel -f"
+    echo -e "  ${YELLOW}OCServ Logs:${NC}   journalctl -u ocserv -f"
+    echo -e "  ${YELLOW}Restart Panel:${NC} systemctl restart ocserv-panel"
+    echo -e "  ${YELLOW}Restart VPN:${NC}   systemctl restart ocserv"
+    echo ""
+    echo -e "  ${YELLOW}Install Info:${NC}  cat /root/.ocserv-panel-info"
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+}
+
+# Main installation flow
+main() {
+    print_banner
+    check_root
+    check_os
+    get_public_ip
+    get_user_input
+    
+    echo ""
+    log_info "Starting installation..."
+    echo ""
+    
+    install_dependencies
+    setup_ssl
+    configure_ocserv
+    setup_panel
+    create_admin_user
+    create_systemd_service
+    optimize_vps_network
+    setup_firewall
+    start_services
+    save_install_info
+    print_info
+}
+
+# Uninstall function
+uninstall() {
+    log_warning "Uninstalling OCServ Panel..."
+    
+    systemctl stop ocserv-panel 2>/dev/null || true
+    systemctl disable ocserv-panel 2>/dev/null || true
+    rm -f /etc/systemd/system/ocserv-panel.service
+    systemctl daemon-reload
+    
+    rm -rf $PANEL_DIR
+    rm -f /root/.ocserv-panel-info
+    
+    log_success "OCServ Panel uninstalled"
+    log_info "OCServ VPN service was kept intact"
+}
+
+# Parse arguments
+case "${1:-}" in
+    uninstall)
+        uninstall
+        ;;
+    *)
+        main
+        ;;
+esac
