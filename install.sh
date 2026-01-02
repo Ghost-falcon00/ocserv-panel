@@ -497,7 +497,7 @@ Type=simple
 User=root
 WorkingDirectory=${PANEL_DIR}/panel
 Environment="PATH=${PANEL_DIR}/venv/bin:\$PATH"
-ExecStart=${PANEL_DIR}/venv/bin/uvicorn app:app --host 0.0.0.0 --port ${PANEL_PORT} --workers 1
+ExecStart=${PANEL_DIR}/venv/bin/uvicorn app:app --host 0.0.0.0 --port ${PANEL_PORT} --workers 1 --ssl-keyfile /etc/ocserv/ssl/server-key.pem --ssl-certfile /etc/ocserv/ssl/server-cert.pem
 Restart=always
 RestartSec=3
 
