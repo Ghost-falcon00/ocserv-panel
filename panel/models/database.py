@@ -6,6 +6,7 @@ Database Configuration
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from config import settings
+from pathlib import Path
 import os
 
 
@@ -15,11 +16,12 @@ class Base(DeclarativeBase):
 
 
 # Ensure data directory exists
-os.makedirs(settings.DATABASE_PATH.parent, exist_ok=True)
+db_path = Path(settings.DATABASE_PATH)
+os.makedirs(db_path.parent, exist_ok=True)
 
 # Create async engine
 engine = create_async_engine(
-    f"sqlite+aiosqlite:///{settings.DATABASE_PATH}",
+    f"sqlite+aiosqlite:///{db_path}",
     echo=settings.DEBUG,
     future=True
 )
