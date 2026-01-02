@@ -178,11 +178,20 @@ install_dependencies() {
         python3 \
         python3-pip \
         python3-venv \
-        certbot \
         ocserv \
         gnutls-bin \
         net-tools \
+        snapd \
         > /dev/null 2>&1
+    
+    # Fix pyOpenSSL issue on Ubuntu 22.04
+    pip3 install --upgrade pyOpenSSL cryptography 2>/dev/null || true
+    
+    # Install certbot via snap (more reliable than apt)
+    snap install core 2>/dev/null || true
+    snap refresh core 2>/dev/null || true
+    snap install --classic certbot 2>/dev/null || apt-get install -y -qq certbot > /dev/null 2>&1
+    ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
     
     log_success "Dependencies installed"
 }
@@ -194,6 +203,9 @@ setup_ssl() {
     systemctl stop nginx 2>/dev/null || true
     systemctl stop apache2 2>/dev/null || true
     systemctl stop ocserv 2>/dev/null || true
+    fuser -k 80/tcp 2>/dev/null || true
+    
+    sleep 2
     
     # Get certificate
     certbot certonly --standalone --non-interactive --agree-tos \
