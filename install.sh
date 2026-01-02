@@ -417,6 +417,11 @@ EOF
 setup_panel() {
     log_info "Installing OCServ Panel..."
     
+    # Clean existing installation if exists
+    if [[ -d "$PANEL_DIR" ]]; then
+        rm -rf $PANEL_DIR
+    fi
+    
     # Create panel directory
     mkdir -p $PANEL_DIR
     cd $PANEL_DIR
