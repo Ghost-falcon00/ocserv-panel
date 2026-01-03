@@ -111,9 +111,9 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="user-expire">تاریخ انقضا</label>
-                    <input type="datetime-local" id="user-expire">
-                    <small class="form-hint">خالی = نامحدود</small>
+                    <label for="user-days">مدت اعتبار (روز)</label>
+                    <input type="number" id="user-days" min="0" value="30" placeholder="تعداد روز">
+                    <small class="form-hint">۰ = نامحدود | از اولین اتصال محاسبه میشود</small>
                 </div>
             </div>
 
@@ -124,11 +124,14 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="checkbox-label toggle-label">
-                        <input type="checkbox" id="user-active" checked>
-                        <span class="toggle-switch"></span>
-                        فعال
-                    </label>
+                    <label>وضعیت</label>
+                    <div class="toggle-container">
+                        <label class="toggle-wrapper">
+                            <input type="checkbox" id="user-active" checked>
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-text">فعال</span>
+                        </label>
+                    </div>
                 </div>
             </div>
 
@@ -296,6 +299,7 @@
         document.getElementById('user-username').disabled = false;
         document.getElementById('user-password').required = true;
         document.getElementById('user-active').checked = true;
+        document.getElementById('user-days').value = 30;
         document.getElementById('user-modal').classList.add('active');
     }
 
@@ -315,11 +319,14 @@
             document.getElementById('user-traffic').value = trafficGB;
             document.getElementById('traffic-unit').value = '1073741824';
 
+            // Calculate remaining days from expire_date
             if (user.expire_date) {
-                const date = new Date(user.expire_date);
-                document.getElementById('user-expire').value = date.toISOString().slice(0, 16);
+                const expDate = new Date(user.expire_date);
+                const now = new Date();
+                const diffDays = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
+                document.getElementById('user-days').value = Math.max(0, diffDays);
             } else {
-                document.getElementById('user-expire').value = '';
+                document.getElementById('user-days').value = 0;
             }
 
             document.getElementById('user-connections').value = user.max_connections;
@@ -350,10 +357,9 @@
         const password = document.getElementById('user-password').value;
         if (password) data.password = password;
 
-        const expireDate = document.getElementById('user-expire').value;
-        if (expireDate) {
-            data.expire_date = new Date(expireDate).toISOString();
-        }
+        // Send expire_days instead of expire_date
+        const expireDays = parseInt(document.getElementById('user-days').value) || 0;
+        data.expire_days = expireDays;
 
         try {
             if (id) {

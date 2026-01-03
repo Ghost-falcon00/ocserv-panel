@@ -26,7 +26,7 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, description="نام کاربری")
     password: str = Field(..., min_length=4, description="رمز عبور")
     max_traffic: int = Field(default=0, ge=0, description="حداکثر ترافیک (bytes) - 0 = نامحدود")
-    expire_date: Optional[datetime] = Field(default=None, description="تاریخ انقضا")
+    expire_days: int = Field(default=0, ge=0, description="مدت اعتبار (روز) - 0 = نامحدود")
     max_connections: int = Field(default=2, ge=1, description="حداکثر اتصال همزمان")
     note: Optional[str] = Field(default=None, description="یادداشت")
 
@@ -35,7 +35,7 @@ class UserUpdate(BaseModel):
     """ویرایش کاربر"""
     password: Optional[str] = Field(default=None, min_length=4, description="رمز عبور جدید")
     max_traffic: Optional[int] = Field(default=None, ge=0, description="حداکثر ترافیک")
-    expire_date: Optional[datetime] = Field(default=None, description="تاریخ انقضا")
+    expire_days: Optional[int] = Field(default=None, ge=0, description="مدت اعتبار (روز)")
     max_connections: Optional[int] = Field(default=None, ge=1, description="حداکثر اتصال همزمان")
     is_active: Optional[bool] = Field(default=None, description="فعال/غیرفعال")
     note: Optional[str] = Field(default=None, description="یادداشت")
@@ -170,12 +170,13 @@ async def create_user(
             detail="خطا در ایجاد کاربر در OCServ"
         )
     
-    # Add to database
+    # Add to database - expire_date will be calculated on first connection
     new_user = User(
         username=user_data.username,
         password=user_data.password,  # Stored for password changes
         max_traffic=user_data.max_traffic,
-        expire_date=user_data.expire_date,
+        expire_days=user_data.expire_days,  # Days, not date
+        expire_date=None,  # Will be set on first connection
         max_connections=user_data.max_connections,
         note=user_data.note
     )
@@ -239,8 +240,14 @@ async def update_user(
     # Update other fields
     if user_data.max_traffic is not None:
         user.max_traffic = user_data.max_traffic
-    if user_data.expire_date is not None:
-        user.expire_date = user_data.expire_date
+    if user_data.expire_days is not None:
+        user.expire_days = user_data.expire_days
+        # Recalculate expire_date if user has already connected
+        if user.first_connection and user_data.expire_days > 0:
+            from datetime import timedelta
+            user.expire_date = user.first_connection + timedelta(days=user_data.expire_days)
+        elif user_data.expire_days == 0:
+            user.expire_date = None  # Unlimited
     if user_data.max_connections is not None:
         user.max_connections = user_data.max_connections
     if user_data.is_active is not None:

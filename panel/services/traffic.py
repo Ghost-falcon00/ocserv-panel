@@ -44,6 +44,19 @@ class TrafficService:
                 if not user:
                     continue
                 
+                # ═══════════════════════════════════════════════════════════
+                # اولین اتصال: محاسبه تاریخ انقضا
+                # ═══════════════════════════════════════════════════════════
+                if not user.first_connection:
+                    from datetime import timedelta
+                    user.first_connection = datetime.now()
+                    user.last_connection = datetime.now()
+                    
+                    # Calculate expire_date based on expire_days
+                    if user.expire_days and user.expire_days > 0:
+                        user.expire_date = user.first_connection + timedelta(days=user.expire_days)
+                        logger.info(f"User {username} first connection - expires: {user.expire_date}")
+                
                 # Get detailed traffic for this user
                 traffic = await ocserv_service.get_user_traffic(username)
                 current_rx = traffic['rx']

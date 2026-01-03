@@ -74,8 +74,10 @@ class User(Base):
     # ═══════════════════════════════════════════════════════════
     # محدودیت زمان
     # ═══════════════════════════════════════════════════════════
-    expire_date = Column(DateTime, nullable=True)  # تاریخ انقضا - null = نامحدود
+    expire_days = Column(Integer, default=0)  # مدت اعتبار (روز) - 0 = نامحدود
+    expire_date = Column(DateTime, nullable=True)  # تاریخ انقضا - محاسبه شده از اولین اتصال
     start_date = Column(DateTime, server_default=func.now())  # تاریخ شروع
+    first_connection = Column(DateTime, nullable=True)  # اولین اتصال - برای محاسبه انقضا
     
     # ═══════════════════════════════════════════════════════════
     # محدودیت اتصال - PER USER
