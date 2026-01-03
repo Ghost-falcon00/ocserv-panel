@@ -36,13 +36,22 @@ class QuotaService:
         try:
             import subprocess
             
-            # Add iptables rule to drop connections from this IP to OCServ port
-            cmd = f"iptables -I INPUT -s {ip} -p tcp --dport 443 -j DROP"
+            # Kill existing connections from this IP first
+            kill_cmd = f"ss -K dst {ip} 2>/dev/null || true"
+            subprocess.run(kill_cmd, shell=True, check=False)
+            
+            # Block ALL traffic from this IP (not just port 443)
+            # Using REJECT sends RST which is faster than DROP
+            cmd = f"iptables -I INPUT -s {ip} -j REJECT --reject-with icmp-port-unreachable"
             subprocess.run(cmd, shell=True, check=False)
             
-            # Also block UDP
-            cmd = f"iptables -I INPUT -s {ip} -p udp --dport 443 -j DROP"
+            # Also block in FORWARD chain for VPN traffic
+            cmd = f"iptables -I FORWARD -s {ip} -j REJECT --reject-with icmp-port-unreachable"
             subprocess.run(cmd, shell=True, check=False)
+            
+            # Kill any established connections again
+            kill_cmd = f"conntrack -D -s {ip} 2>/dev/null || true"
+            subprocess.run(kill_cmd, shell=True, check=False)
             
             logger.info(f"Blocked IP {ip} for {seconds} seconds (user: {username})")
             
@@ -57,6 +66,7 @@ class QuotaService:
             # Schedule unblock
             asyncio.create_task(self._unblock_ip_later(ip, seconds))
             
+            
         except Exception as e:
             logger.error(f"Error blocking IP {ip}: {e}")
     
@@ -70,11 +80,11 @@ class QuotaService:
         try:
             import subprocess
             
-            # Remove iptables rules
-            cmd = f"iptables -D INPUT -s {ip} -p tcp --dport 443 -j DROP"
+            # Remove iptables rules (matching the new format)
+            cmd = f"iptables -D INPUT -s {ip} -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || true"
             subprocess.run(cmd, shell=True, check=False)
             
-            cmd = f"iptables -D INPUT -s {ip} -p udp --dport 443 -j DROP"
+            cmd = f"iptables -D FORWARD -s {ip} -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || true"
             subprocess.run(cmd, shell=True, check=False)
             
             if ip in self._blocked_ips:
