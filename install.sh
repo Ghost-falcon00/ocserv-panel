@@ -188,6 +188,7 @@ install_dependencies() {
         net-tools \
         openssl \
         psmisc \
+        conntrack \
         > /dev/null 2>&1
     
     log_success "Dependencies installed"
