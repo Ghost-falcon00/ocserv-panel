@@ -6,6 +6,7 @@ Traffic Monitoring Service
 import asyncio
 from typing import Dict, Optional
 from datetime import datetime
+from pathlib import Path
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.database import async_session
@@ -13,8 +14,36 @@ from models.user import User
 from models.connection_log import ConnectionLog
 from services.ocserv import ocserv_service
 import logging
+from logging.handlers import RotatingFileHandler
+from config import settings
 
 logger = logging.getLogger(__name__)
+
+# Setup dedicated traffic logger
+LOG_DIR = Path(settings.PANEL_PATH) / "panel" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+traffic_logger = logging.getLogger("traffic_file")
+traffic_logger.setLevel(logging.INFO)
+traffic_handler = RotatingFileHandler(
+    LOG_DIR / "traffic.log",
+    maxBytes=10*1024*1024,
+    backupCount=3,
+    encoding="utf-8"
+)
+traffic_handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s"))
+traffic_logger.addHandler(traffic_handler)
+
+connection_logger = logging.getLogger("connections_file")
+connection_logger.setLevel(logging.INFO)
+conn_handler = RotatingFileHandler(
+    LOG_DIR / "connections.log",
+    maxBytes=10*1024*1024,
+    backupCount=3,
+    encoding="utf-8"
+)
+conn_handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s"))
+connection_logger.addHandler(conn_handler)
 
 
 class TrafficService:
@@ -26,6 +55,22 @@ class TrafficService:
     def __init__(self):
         self._last_traffic: Dict[str, Dict[str, int]] = {}
         self._running = False
+    
+    def _format_bytes(self, bytes_val: int) -> str:
+        """Format bytes to human readable"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if bytes_val < 1024:
+                return f"{bytes_val:.1f}{unit}"
+            bytes_val /= 1024
+        return f"{bytes_val:.1f}TB"
+    
+    def _format_speed(self, bytes_per_sec: float) -> str:
+        """Format speed to human readable"""
+        for unit in ['B/s', 'KB/s', 'MB/s', 'GB/s']:
+            if bytes_per_sec < 1024:
+                return f"{bytes_per_sec:.1f}{unit}"
+            bytes_per_sec /= 1024
+        return f"{bytes_per_sec:.1f}TB/s"
     
     async def update_user_traffic(self, session: AsyncSession):
         """به‌روزرسانی ترافیک تمام کاربران آنلاین و اعمال فوری محدودیت‌ها"""
@@ -62,10 +107,20 @@ class TrafficService:
                     user.first_connection = datetime.now()
                     user.last_connection = datetime.now()
                     
+                    # Log first connection
+                    client_ip = connections[0].get('client_ip', 'unknown') if connections else 'unknown'
+                    connection_logger.info(f"CONNECT | USER:{username} | IP:{client_ip} | TYPE:first_connection")
+                    
                     # Calculate expire_date based on expire_days
                     if user.expire_days and user.expire_days > 0:
                         user.expire_date = user.first_connection + timedelta(days=user.expire_days)
                         logger.info(f"User {username} first connection - expires: {user.expire_date}")
+                else:
+                    # Log regular connection
+                    for conn in connections:
+                        client_ip = conn.get('client_ip', 'unknown')
+                        conn_id = conn.get('id', 'unknown')
+                        connection_logger.info(f"ACTIVE | USER:{username} | IP:{client_ip} | ID:{conn_id}")
                 
                 # Get detailed traffic for this user
                 traffic = await ocserv_service.get_user_traffic(username)
@@ -73,10 +128,26 @@ class TrafficService:
                 current_tx = traffic['tx']
                 
                 # Calculate delta from last check
-                last = self._last_traffic.get(username, {'rx': 0, 'tx': 0})
+                last = self._last_traffic.get(username, {'rx': 0, 'tx': 0, 'time': datetime.now()})
                 delta_rx = max(0, current_rx - last['rx'])
                 delta_tx = max(0, current_tx - last['tx'])
                 delta_total = delta_rx + delta_tx
+                
+                # Calculate speed (bytes per second)
+                time_diff = (datetime.now() - last.get('time', datetime.now())).total_seconds()
+                if time_diff > 0:
+                    speed_rx = delta_rx / time_diff
+                    speed_tx = delta_tx / time_diff
+                else:
+                    speed_rx = speed_tx = 0
+                
+                # Log to traffic file
+                traffic_logger.info(
+                    f"USER:{username} | CONN:{user.current_connections} | "
+                    f"RX:{self._format_bytes(delta_rx)} ({self._format_speed(speed_rx)}) | "
+                    f"TX:{self._format_bytes(delta_tx)} ({self._format_speed(speed_tx)}) | "
+                    f"TOTAL:{self._format_bytes(user.used_traffic)}"
+                )
                 
                 if delta_total > 0:
                     # Update user's used_traffic
@@ -89,6 +160,7 @@ class TrafficService:
                     # ═══════════════════════════════════════════════════════════
                     if user.max_traffic > 0 and user.used_traffic >= user.max_traffic:
                         logger.warning(f"User {username} EXCEEDED traffic limit! Disconnecting...")
+                        connection_logger.info(f"BLOCKED | USER:{username} | REASON:traffic_exceeded | LIMIT:{self._format_bytes(user.max_traffic)}")
                         await ocserv_service.disconnect_user(username)
                         await ocserv_service.lock_user(username)
                         user.is_active = False
@@ -97,7 +169,7 @@ class TrafficService:
                         logger.info(f"User {username} disconnected and locked - traffic exceeded")
                 
                 # Save current values for next check
-                self._last_traffic[username] = {'rx': current_rx, 'tx': current_tx}
+                self._last_traffic[username] = {'rx': current_rx, 'tx': current_tx, 'time': datetime.now()}
             
             # Mark offline users
             online_usernames = [u['username'] for u in online_users]
