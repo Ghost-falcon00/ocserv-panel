@@ -128,15 +128,50 @@
         }
     }
 
+    let liveInterval = null;
+
+    function toggleLiveMode() {
+        const isLive = document.getElementById('live-mode').checked;
+        const liveBtn = document.querySelector('.toggle-text');
+
+        if (isLive) {
+            // Start polling every 2 seconds
+            liveInterval = setInterval(async () => {
+                try {
+                    const data = await apiGet(`/api/logs/${currentLogType}?lines=200`);
+                    const newLogs = data.logs || [];
+
+                    // Check if there are new logs
+                    if (newLogs.length !== allLogs.length ||
+                        (newLogs.length > 0 && newLogs[newLogs.length - 1] !== allLogs[allLogs.length - 1])) {
+                        allLogs = newLogs;
+                        renderLogs();
+                        document.getElementById('log-count').textContent = `${allLogs.length} خط`;
+                    }
+                } catch (error) {
+                    console.error('Error polling logs:', error);
+                }
+            }, 2000);
+
+            showToast('حالت زنده فعال شد', 'success');
+        } else {
+            if (liveInterval) {
+                clearInterval(liveInterval);
+                liveInterval = null;
+            }
+            showToast('حالت زنده غیرفعال شد', 'info');
+        }
+    }
+
     function switchLogType(type, btn) {
         // Update active tab
         document.querySelectorAll('.log-tab').forEach(t => t.classList.remove('active'));
         btn.classList.add('active');
 
         // Stop live mode if active
-        if (eventSource) {
-            eventSource.close();
-            eventSource = null;
+        if (liveInterval) {
+            clearInterval(liveInterval);
+            liveInterval = null;
             document.getElementById('live-mode').checked = false;
         }
 
@@ -155,42 +190,6 @@
 
     function refreshLogs() {
         loadLogs(currentLogType);
-    }
-
-    function toggleLiveMode() {
-        const isLive = document.getElementById('live-mode').checked;
-
-        if (isLive) {
-            // Start SSE stream
-            const token = localStorage.getItem('access_token');
-            eventSource = new EventSource(`/api/logs/stream?log_type=${currentLogType}&token=${token}`);
-
-            eventSource.onmessage = (event) => {
-                if (event.data) {
-                    allLogs.push(event.data);
-                    // Keep only last 500 lines
-                    if (allLogs.length > 500) {
-                        allLogs = allLogs.slice(-500);
-                    }
-                    renderLogs();
-                    document.getElementById('log-count').textContent = `${allLogs.length} خط`;
-                }
-            };
-
-            eventSource.onerror = () => {
-                console.error('SSE connection error');
-                document.getElementById('live-mode').checked = false;
-                if (eventSource) {
-                    eventSource.close();
-                    eventSource = null;
-                }
-            };
-        } else {
-            if (eventSource) {
-                eventSource.close();
-                eventSource = null;
-            }
-        }
     }
 
     async function loadLogStats() {
