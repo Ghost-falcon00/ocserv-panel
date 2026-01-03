@@ -24,33 +24,29 @@ class QuotaService:
     - کنترل تعداد اتصال همزمان per-user
     """
     
+    BLOCKED_FILE = "/etc/ocserv/blocked_ips.txt"
+    
     def __init__(self):
         self._blocked_ips = {}  # IP -> {unblock_time, username, reason}
     
     async def _temp_block_ip(self, ip: str, username: str = "", seconds: int = 86400):
         """
-        بلاک موقت IP با iptables
-        برای جلوگیری از reconnect فوری
+        بلاک موقت IP با فایل - برای OCServ connect-script
         پیشفرض: 1 روز (86400 ثانیه)
         """
         try:
             import subprocess
             
-            # Kill existing connections from this IP first
+            # Add IP to blocked file (OCServ connect-script will check this)
+            with open(self.BLOCKED_FILE, "a") as f:
+                f.write(f"{ip}\n")
+            
+            # Also try iptables as backup
+            cmd = f"iptables -I INPUT -s {ip} -p tcp --dport 443 -j DROP 2>/dev/null || true"
+            subprocess.run(cmd, shell=True, check=False)
+            
+            # Kill existing connections
             kill_cmd = f"ss -K dst {ip} 2>/dev/null || true"
-            subprocess.run(kill_cmd, shell=True, check=False)
-            
-            # Block ALL traffic from this IP (not just port 443)
-            # Using REJECT sends RST which is faster than DROP
-            cmd = f"iptables -I INPUT -s {ip} -j REJECT --reject-with icmp-port-unreachable"
-            subprocess.run(cmd, shell=True, check=False)
-            
-            # Also block in FORWARD chain for VPN traffic
-            cmd = f"iptables -I FORWARD -s {ip} -j REJECT --reject-with icmp-port-unreachable"
-            subprocess.run(cmd, shell=True, check=False)
-            
-            # Kill any established connections again
-            kill_cmd = f"conntrack -D -s {ip} 2>/dev/null || true"
             subprocess.run(kill_cmd, shell=True, check=False)
             
             logger.info(f"Blocked IP {ip} for {seconds} seconds (user: {username})")
@@ -65,7 +61,6 @@ class QuotaService:
             
             # Schedule unblock
             asyncio.create_task(self._unblock_ip_later(ip, seconds))
-            
             
         except Exception as e:
             logger.error(f"Error blocking IP {ip}: {e}")
@@ -89,11 +84,19 @@ class QuotaService:
         try:
             import subprocess
             
-            # Remove iptables rules (matching the new format)
-            cmd = f"iptables -D INPUT -s {ip} -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || true"
-            subprocess.run(cmd, shell=True, check=False)
+            # Remove IP from blocked file
+            try:
+                with open(self.BLOCKED_FILE, "r") as f:
+                    lines = f.readlines()
+                with open(self.BLOCKED_FILE, "w") as f:
+                    for line in lines:
+                        if line.strip() != ip:
+                            f.write(line)
+            except FileNotFoundError:
+                pass
             
-            cmd = f"iptables -D FORWARD -s {ip} -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || true"
+            # Remove iptables rule as backup
+            cmd = f"iptables -D INPUT -s {ip} -p tcp --dport 443 -j DROP 2>/dev/null || true"
             subprocess.run(cmd, shell=True, check=False)
             
             if ip in self._blocked_ips:

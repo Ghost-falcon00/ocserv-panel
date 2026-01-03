@@ -337,6 +337,9 @@ use-occtl = true
 pid-file = /run/ocserv.pid
 server-stats-reset-time = 604800
 
+# Connect script - check blocked IPs before allowing connection
+connect-script = /etc/ocserv/check_blocked.sh
+
 # Network
 device = vpns
 predictable-ips = true
@@ -412,6 +415,10 @@ EOF
     touch /etc/ocserv/ocpasswd
     chmod 600 /etc/ocserv/ocpasswd
     
+    # Create blocked IPs file and connect script
+    touch /etc/ocserv/blocked_ips.txt
+    chmod 644 /etc/ocserv/blocked_ips.txt
+    
     log_success "OCServ configured with Iran-optimized settings"
 }
 
@@ -449,6 +456,10 @@ EOF
     
     # Create data directory
     mkdir -p panel/data
+    
+    # Copy connect script to OCServ
+    cp scripts/check_blocked.sh /etc/ocserv/check_blocked.sh
+    chmod +x /etc/ocserv/check_blocked.sh
     
     log_success "Panel installed"
 }
