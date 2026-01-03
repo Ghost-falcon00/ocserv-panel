@@ -8,6 +8,9 @@
 <div class="system-logs-page">
     <!-- Log Type Tabs -->
     <div class="log-tabs">
+        <button class="log-tab" data-type="live" onclick="switchLogType('live', this)">
+            📡 مانیتور زنده
+        </button>
         <button class="log-tab active" data-type="panel" onclick="switchLogType('panel', this)">
             🖥️ پنل
         </button>
@@ -89,6 +92,12 @@
         viewer.innerHTML = '<div class="log-loading"><div class="loading-spinner"></div><span>در حال بارگذاری...</span></div>';
 
         try {
+            if (type === 'live') {
+                // Live traffic monitor - different display
+                await loadLiveTraffic();
+                return;
+            }
+
             const data = await apiGet(`/api/logs/${type}?lines=200`);
             allLogs = data.logs || [];
             renderLogs();
@@ -97,6 +106,76 @@
             console.error('Error loading logs:', error);
             viewer.innerHTML = '<div class="log-error">خطا در بارگذاری لاگ‌ها</div>';
         }
+    }
+
+    async function loadLiveTraffic() {
+        const viewer = document.getElementById('log-viewer');
+        try {
+            const users = await apiGet('/api/dashboard/live-traffic');
+
+            if (users.length === 0) {
+                viewer.innerHTML = '<div class="log-empty">هیچ کاربری آنلاین نیست</div>';
+                document.getElementById('log-count').textContent = '0 کاربر';
+                return;
+            }
+
+            let html = '<div class="live-traffic-grid">';
+            for (const user of users) {
+                const rxSpeed = formatSpeed(user.rx_speed);
+                const txSpeed = formatSpeed(user.tx_speed);
+                const totalUsed = formatBytes(user.total_used);
+                const maxTraffic = user.max_traffic > 0 ? formatBytes(user.max_traffic) : '∞';
+                const percent = user.max_traffic > 0 ? Math.round((user.total_used / user.max_traffic) * 100) : 0;
+
+                html += `
+                <div class="live-user-card">
+                    <div class="live-user-header">
+                        <span class="live-user-avatar">${user.username.charAt(0).toUpperCase()}</span>
+                        <div class="live-user-info">
+                            <strong>${user.username}</strong>
+                            <span class="live-conn-count">${user.connections} اتصال</span>
+                        </div>
+                        <span class="live-status-dot"></span>
+                    </div>
+                    <div class="live-speeds">
+                        <div class="speed-item download">
+                            <span class="speed-arrow">↓</span>
+                            <span class="speed-value">${rxSpeed}</span>
+                        </div>
+                        <div class="speed-item upload">
+                            <span class="speed-arrow">↑</span>
+                            <span class="speed-value">${txSpeed}</span>
+                        </div>
+                    </div>
+                    <div class="live-traffic-bar">
+                        <div class="traffic-progress" style="width: ${Math.min(percent, 100)}%"></div>
+                    </div>
+                    <div class="live-traffic-text">
+                        ${totalUsed} / ${maxTraffic}
+                    </div>
+                    <div class="live-ips">
+                        ${user.client_ips.map(ip => `<span class="live-ip">📱 ${ip}</span>`).join('')}
+                    </div>
+                </div>`;
+            }
+            html += '</div>';
+            viewer.innerHTML = html;
+            document.getElementById('log-count').textContent = `${users.length} کاربر آنلاین`;
+        } catch (error) {
+            console.error('Error loading live traffic:', error);
+            viewer.innerHTML = '<div class="log-error">خطا در بارگذاری ترافیک</div>';
+        }
+    }
+
+    function formatSpeed(bytesPerSec) {
+        if (!bytesPerSec || bytesPerSec < 1) return '0 B/s';
+        const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+        let i = 0;
+        while (bytesPerSec >= 1024 && i < units.length - 1) {
+            bytesPerSec /= 1024;
+            i++;
+        }
+        return bytesPerSec.toFixed(1) + ' ' + units[i];
     }
 
     function renderLogs() {

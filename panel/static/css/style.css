@@ -1843,3 +1843,135 @@ textarea:focus {
     color: var(--text-muted);
     gap: 12px;
 }
+
+/* ========== Live Traffic Monitor ========== */
+.live-traffic-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    padding: 8px;
+}
+
+.live-user-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.live-user-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.live-user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 1.2rem;
+}
+
+.live-user-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.live-user-info strong {
+    color: var(--text-primary);
+}
+
+.live-conn-count {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.live-status-dot {
+    width: 10px;
+    height: 10px;
+    background: #22c55e;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.live-speeds {
+    display: flex;
+    justify-content: space-around;
+    margin-bottom: 12px;
+}
+
+.speed-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.speed-item.download .speed-arrow {
+    color: #22c55e;
+}
+
+.speed-item.upload .speed-arrow {
+    color: #3b82f6;
+}
+
+.speed-value {
+    color: var(--text-primary);
+}
+
+.live-traffic-bar {
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.traffic-progress {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.live-traffic-text {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.live-ips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.live-ip {
+    font-size: 0.75rem;
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: 12px;
+    color: var(--text-muted);
+}

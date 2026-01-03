@@ -153,6 +153,63 @@ async def get_online_users(
     return users
 
 
+@router.get("/live-traffic")
+async def get_live_traffic(
+    current_admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    ترافیک لحظه‌ای همه کاربران آنلاین
+    با سرعت و اطلاعات اتصال
+    """
+    from services.traffic import traffic_service
+    
+    online_users = await ocserv_service.get_online_users()
+    
+    # Group by username
+    user_data = {}
+    for conn in online_users:
+        username = conn.get('username')
+        if username not in user_data:
+            user_data[username] = {
+                'username': username,
+                'connections': [],
+                'client_ips': []
+            }
+        user_data[username]['connections'].append(conn)
+        if conn.get('client_ip'):
+            user_data[username]['client_ips'].append(conn.get('client_ip'))
+    
+    result = []
+    for username, data in user_data.items():
+        # Get traffic info
+        traffic = await ocserv_service.get_user_traffic(username)
+        
+        # Get speed from cache
+        last = traffic_service._last_traffic.get(username, {})
+        rx_speed = last.get('rx_speed', 0) if last else 0
+        tx_speed = last.get('tx_speed', 0) if last else 0
+        
+        # Get user from DB
+        user_result = await db.execute(select(User).where(User.username == username))
+        user = user_result.scalar_one_or_none()
+        
+        result.append({
+            'username': username,
+            'connections': len(data['connections']),
+            'client_ips': list(set(data['client_ips'])),
+            'rx_bytes': traffic.get('rx', 0),
+            'tx_bytes': traffic.get('tx', 0),
+            'rx_speed': rx_speed,
+            'tx_speed': tx_speed,
+            'total_used': user.used_traffic if user else 0,
+            'max_traffic': user.max_traffic if user else 0,
+            'connected_since': data['connections'][0].get('connected_at', '') if data['connections'] else ''
+        })
+    
+    return result
+
+
 @router.get("/server-status", response_model=ServerStatus)
 async def get_server_status(
     current_admin: Admin = Depends(get_current_admin)

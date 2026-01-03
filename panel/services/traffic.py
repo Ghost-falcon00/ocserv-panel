@@ -168,8 +168,14 @@ class TrafficService:
                         user.current_connections = 0
                         logger.info(f"User {username} disconnected and locked - traffic exceeded")
                 
-                # Save current values for next check
-                self._last_traffic[username] = {'rx': current_rx, 'tx': current_tx, 'time': datetime.now()}
+                # Save current values for next check (including speed for API)
+                self._last_traffic[username] = {
+                    'rx': current_rx, 
+                    'tx': current_tx, 
+                    'time': datetime.now(),
+                    'rx_speed': speed_rx,
+                    'tx_speed': speed_tx
+                }
             
             # Mark offline users
             online_usernames = [u['username'] for u in online_users]
