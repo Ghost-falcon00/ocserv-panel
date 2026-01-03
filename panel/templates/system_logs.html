@@ -242,19 +242,34 @@
         }
     }
 
+    let liveMonitorInterval = null;  // Separate interval for live monitor
+
     function switchLogType(type, btn) {
         // Update active tab
         document.querySelectorAll('.log-tab').forEach(t => t.classList.remove('active'));
         btn.classList.add('active');
 
-        // Stop live mode if active
+        // Stop any existing intervals
         if (liveInterval) {
             clearInterval(liveInterval);
             liveInterval = null;
             document.getElementById('live-mode').checked = false;
         }
+        if (liveMonitorInterval) {
+            clearInterval(liveMonitorInterval);
+            liveMonitorInterval = null;
+        }
 
-        loadLogs(type);
+        // If live monitor - auto-start refresh
+        if (type === 'live') {
+            loadLogs(type);
+            // Auto refresh every 3 seconds
+            liveMonitorInterval = setInterval(() => {
+                loadLiveTraffic();
+            }, 3000);
+        } else {
+            loadLogs(type);
+        }
     }
 
     function filterLogs() {
