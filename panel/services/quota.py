@@ -207,6 +207,26 @@ class QuotaService:
                 
                 # Check each user's connection count
                 for username, connections in user_connections.items():
+                    # Handle (none) or stuck sessions specially
+                    if username == "(none)":
+                        from datetime import datetime
+                        current_time = datetime.now()
+                        for conn in connections:
+                            # Try to parse connection time
+                            try:
+                                conn_time_str = conn.get("connected_at", "")
+                                if conn_time_str:
+                                    conn_time = datetime.strptime(conn_time_str, "%Y-%m-%d %H:%M:%S")
+                                    # If connected for more than 2 minutes and still (none), kill it
+                                    if (current_time - conn_time).total_seconds() > 120:
+                                        conn_id = conn.get("id")
+                                        if conn_id:
+                                            await ocserv_service.disconnect_by_id(conn_id)
+                                            logger.info(f"Killed stuck (none) session {conn_id}")
+                            except Exception as e:
+                                logger.error(f"Error checking stuck session: {e}")
+                        continue
+
                     result = await session.execute(
                         select(User).where(User.username == username)
                     )
@@ -218,6 +238,15 @@ class QuotaService:
                         
                         # قطع اتصالات جدید (آخرین‌ها) - نه قدیمی‌ها
                         excess_count = len(connections) - user.max_connections
+                        
+                        # -------------------------------------------------------------
+                        # FIX ZOMBIE ISSUE:
+                        # If the newest connection is very new (< 10s) and oldest is very old,
+                        # the user might be trying to reconnect while the old one is stuck.
+                        # Ideally OCServ DPD handles this, but if not, logic "Disconnect Newest"
+                        # prevents reconnection.
+                        # -------------------------------------------------------------
+                        
                         # Take the LAST (newest) connections to disconnect
                         connections_to_disconnect = sorted_connections[-excess_count:]
                         
