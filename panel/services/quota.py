@@ -24,6 +24,54 @@ class QuotaService:
     - کنترل تعداد اتصال همزمان per-user
     """
     
+    def __init__(self):
+        self._blocked_ips = {}  # IP -> unblock_time
+    
+    async def _temp_block_ip(self, ip: str, seconds: int = 300):
+        """
+        بلاک موقت IP با iptables
+        برای جلوگیری از reconnect فوری
+        """
+        try:
+            import subprocess
+            
+            # Add iptables rule to drop connections from this IP to OCServ port
+            cmd = f"iptables -I INPUT -s {ip} -p tcp --dport 443 -j DROP"
+            subprocess.run(cmd, shell=True, check=False)
+            
+            # Also block UDP
+            cmd = f"iptables -I INPUT -s {ip} -p udp --dport 443 -j DROP"
+            subprocess.run(cmd, shell=True, check=False)
+            
+            logger.info(f"Temporarily blocked IP {ip} for {seconds} seconds")
+            
+            # Schedule unblock
+            self._blocked_ips[ip] = datetime.now() + timedelta(seconds=seconds)
+            asyncio.create_task(self._unblock_ip_later(ip, seconds))
+            
+        except Exception as e:
+            logger.error(f"Error blocking IP {ip}: {e}")
+    
+    async def _unblock_ip_later(self, ip: str, seconds: int):
+        """رفع بلاک IP بعد از مدت مشخص"""
+        await asyncio.sleep(seconds)
+        try:
+            import subprocess
+            
+            # Remove iptables rules
+            cmd = f"iptables -D INPUT -s {ip} -p tcp --dport 443 -j DROP"
+            subprocess.run(cmd, shell=True, check=False)
+            
+            cmd = f"iptables -D INPUT -s {ip} -p udp --dport 443 -j DROP"
+            subprocess.run(cmd, shell=True, check=False)
+            
+            if ip in self._blocked_ips:
+                del self._blocked_ips[ip]
+            
+            logger.info(f"Unblocked IP {ip}")
+        except Exception as e:
+            logger.error(f"Error unblocking IP {ip}: {e}")
+    
     async def check_quotas(self):
         """بررسی محدودیت‌های تمام کاربران"""
         async with async_session() as session:
@@ -111,12 +159,18 @@ class QuotaService:
                         connections_to_disconnect = connections[:excess_count]
                         
                         for conn in connections_to_disconnect:
-                            # Use 'id' not 'session_id'
                             conn_id = conn.get("id")
+                            client_ip = conn.get("client_ip")
+                            
                             if conn_id:
+                                # Disconnect the session
                                 success = await ocserv_service.disconnect_by_id(conn_id)
                                 if success:
                                     logger.info(f"Disconnected excess session {conn_id} for {username}")
+                                    
+                                    # Temporarily block IP to prevent immediate reconnect
+                                    if client_ip:
+                                        await self._temp_block_ip(client_ip, 300)  # 5 minutes
                         
                         logger.warning(
                             f"User {username} had {len(connections)} connections, "
