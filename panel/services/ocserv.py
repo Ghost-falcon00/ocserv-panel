@@ -52,14 +52,8 @@ class OCServService:
         """
         try:
             import os
-            # Check if passwd file exists - don't use -c if it does (it would overwrite!)
-            use_create_flag = not os.path.exists(self.passwd_file) or os.path.getsize(self.passwd_file) == 0
-            
-            # Build command
-            if use_create_flag:
-                cmd = [self.ocpasswd, "-c", self.passwd_file, username]
-            else:
-                cmd = [self.ocpasswd, self.passwd_file, username]
+            # -c flag is always required to specify password file path
+            cmd = [self.ocpasswd, "-c", self.passwd_file, username]
             
             # Use stdin to pass password (more reliable than echo)
             password_input = f"{password}\n{password}\n"
@@ -85,8 +79,8 @@ class OCServService:
     async def delete_user(self, username: str) -> bool:
         """حذف کاربر از OCServ"""
         try:
-            # Don't use -c flag for delete - it would wipe the file!
-            cmd = [self.ocpasswd, "-d", username]
+            # -c flag is required to specify password file path
+            cmd = [self.ocpasswd, "-c", self.passwd_file, "-d", username]
             returncode, _, stderr = await self._run_command(cmd)
             
             if returncode == 0:
