@@ -220,18 +220,26 @@ class OCServService:
             
             rx, tx = 0, 0
             
-            # Format: "RX: 259301 (259.3 KB)   TX: 421742 (421.7 KB)"
-            # RX and TX may be on the same line or separate lines
+            # Format: "        RX: 57634326 (57.6 MB)   TX: 4155174941 (4.2 GB)"
+            # Must match line that STARTS with RX: (after whitespace), not "Average bandwidth RX:"
             for line in stdout.split('\n'):
-                # Look for RX: followed by number
-                rx_match = re.search(r'RX:\s*(\d+)', line)
-                if rx_match:
-                    rx = int(rx_match.group(1))
+                line = line.strip()
                 
-                # Look for TX: followed by number
-                tx_match = re.search(r'TX:\s*(\d+)', line)
-                if tx_match:
-                    tx = int(tx_match.group(1))
+                # Match line that starts with "RX:" (the main traffic line)
+                # This line has format: "RX: 12345 (12.3 KB)   TX: 67890 (67.8 KB)"
+                if line.startswith('RX:'):
+                    # Extract RX value
+                    rx_match = re.search(r'^RX:\s*(\d+)', line)
+                    if rx_match:
+                        rx = int(rx_match.group(1))
+                    
+                    # Extract TX value from same line
+                    tx_match = re.search(r'TX:\s*(\d+)', line)
+                    if tx_match:
+                        tx = int(tx_match.group(1))
+                    
+                    # Found the line, no need to continue
+                    break
             
             logger.debug(f"Traffic for {username}: RX={rx}, TX={tx}")
             return {"rx": rx, "tx": tx}
