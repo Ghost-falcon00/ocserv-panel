@@ -296,7 +296,7 @@ udp-port = ${OCSERV_PORT}
 run-as-user = nobody
 run-as-group = daemon
 socket-file = /run/ocserv.socket
-isolate-workers = true
+isolate-workers = false
 
 # SSL Certificate
 server-cert = /etc/ocserv/ssl/server-cert.pem
