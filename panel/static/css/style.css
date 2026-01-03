@@ -623,6 +623,44 @@ a:hover {
     border-radius: 9px;
 }
 
+/* Expandable IP List */
+.user-ip-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-expand {
+    background: transparent;
+    border: none;
+    color: var(--accent-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0;
+}
+
+.btn-expand:hover {
+    text-decoration: underline;
+}
+
+.ip-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px dashed var(--border-color);
+}
+
+.ip-list.hidden {
+    display: none;
+}
+
+.extra-ip {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
 /* ========== Forms ========== */
 .form-group {
     margin-bottom: 16px;

@@ -227,13 +227,21 @@
                 grouped[user.username].count++;
             });
 
-            container.innerHTML = Object.values(grouped).map(user => `
+            container.innerHTML = Object.values(grouped).map((user, idx) => `
             <div class="online-user-item">
                 <div class="user-info">
                     <span class="user-avatar">${user.username.charAt(0).toUpperCase()}</span>
                     <div>
                         <span class="user-name">${user.username} ${user.count > 1 ? `<span class="conn-badge">${user.count}</span>` : ''}</span>
-                        <span class="user-ip">${user.client_ips[0]}${user.count > 1 ? ` (+${user.count - 1})` : ''}</span>
+                        <div class="user-ip-wrap">
+                            <span class="user-ip">${user.client_ips[0]}</span>
+                            ${user.count > 1 ? `<button class="btn-expand" onclick="toggleIPs('ips-${idx}')">(+${user.count - 1})</button>` : ''}
+                        </div>
+                        ${user.count > 1 ? `
+                        <div class="ip-list hidden" id="ips-${idx}">
+                            ${user.client_ips.slice(1).map(ip => `<span class="extra-ip">📱 ${ip}</span>`).join('')}
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
                 <button class="btn-icon danger" onclick="disconnectUser('${user.username}')" title="قطع اتصال">
@@ -246,6 +254,13 @@
         `).join('');
         } catch (error) {
             console.error('Error loading online users:', error);
+        }
+    }
+
+    function toggleIPs(id) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.classList.toggle('hidden');
         }
     }
 
