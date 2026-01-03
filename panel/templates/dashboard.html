@@ -213,13 +213,27 @@
                 return;
             }
 
-            container.innerHTML = users.map(user => `
+            // Group users by username
+            const grouped = {};
+            users.forEach(user => {
+                if (!grouped[user.username]) {
+                    grouped[user.username] = {
+                        username: user.username,
+                        client_ips: [],
+                        count: 0
+                    };
+                }
+                grouped[user.username].client_ips.push(user.client_ip);
+                grouped[user.username].count++;
+            });
+
+            container.innerHTML = Object.values(grouped).map(user => `
             <div class="online-user-item">
                 <div class="user-info">
                     <span class="user-avatar">${user.username.charAt(0).toUpperCase()}</span>
                     <div>
-                        <span class="user-name">${user.username}</span>
-                        <span class="user-ip">${user.client_ip}</span>
+                        <span class="user-name">${user.username} ${user.count > 1 ? `<span class="conn-badge">${user.count}</span>` : ''}</span>
+                        <span class="user-ip">${user.client_ips[0]}${user.count > 1 ? ` (+${user.count - 1})` : ''}</span>
                     </div>
                 </div>
                 <button class="btn-icon danger" onclick="disconnectUser('${user.username}')" title="قطع اتصال">

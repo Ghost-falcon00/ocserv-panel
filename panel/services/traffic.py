@@ -32,9 +32,15 @@ class TrafficService:
         try:
             online_users = await ocserv_service.get_online_users()
             
-            for online_user in online_users:
-                username = online_user['username']
-                
+            # Group by username to count connections
+            user_connections = {}
+            for conn in online_users:
+                username = conn.get('username')
+                if username not in user_connections:
+                    user_connections[username] = []
+                user_connections[username].append(conn)
+            
+            for username, connections in user_connections.items():
                 # Get user from database
                 result = await session.execute(
                     select(User).where(User.username == username)
@@ -43,6 +49,10 @@ class TrafficService:
                 
                 if not user:
                     continue
+                
+                # Update connection count
+                user.current_connections = len(connections)
+                user.is_online = True
                 
                 # ═══════════════════════════════════════════════════════════
                 # اولین اتصال: محاسبه تاریخ انقضا
@@ -71,8 +81,6 @@ class TrafficService:
                 if delta_total > 0:
                     # Update user's used_traffic
                     user.used_traffic += delta_total
-                    user.is_online = True
-                    user.current_connections = 1
                     
                     logger.debug(f"Traffic {username}: +{delta_total} bytes, total: {user.used_traffic}")
                     
