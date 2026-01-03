@@ -143,9 +143,15 @@ class OCServService:
                     
                 parts = line.split()
                 if len(parts) >= 7:
+                    username = parts[1]
+                    
+                    # Skip invalid usernames
+                    if not username or username == "(none)" or username == "-":
+                        continue
+                    
                     user = {
                         "id": int(parts[0]) if parts[0].isdigit() else 0,
-                        "username": parts[1],
+                        "username": username,
                         "vpn_ip": parts[2],
                         "client_ip": parts[3],
                         "connected_at": parts[4] + " " + parts[5] if len(parts) > 5 else parts[4],
