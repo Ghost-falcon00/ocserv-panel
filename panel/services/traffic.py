@@ -127,18 +127,26 @@ class TrafficService:
                 current_rx = traffic['rx']
                 current_tx = traffic['tx']
                 
-                # Calculate delta from last check
-                last = self._last_traffic.get(username, {'rx': 0, 'tx': 0, 'time': datetime.now()})
-                delta_rx = max(0, current_rx - last['rx'])
-                delta_tx = max(0, current_tx - last['tx'])
-                delta_total = delta_rx + delta_tx
+                # Check if we have previous data for this user
+                last = self._last_traffic.get(username)
                 
-                # Calculate speed (bytes per second)
-                time_diff = (datetime.now() - last.get('time', datetime.now())).total_seconds()
-                if time_diff > 0:
-                    speed_rx = delta_rx / time_diff
-                    speed_tx = delta_tx / time_diff
+                if last and 'rx' in last:
+                    # Calculate delta from last check
+                    delta_rx = max(0, current_rx - last['rx'])
+                    delta_tx = max(0, current_tx - last['tx'])
+                    delta_total = delta_rx + delta_tx
+                    
+                    # Calculate speed (bytes per second)
+                    time_diff = (datetime.now() - last.get('time', datetime.now())).total_seconds()
+                    if time_diff > 1:  # At least 1 second
+                        speed_rx = delta_rx / time_diff
+                        speed_tx = delta_tx / time_diff
+                    else:
+                        speed_rx = last.get('rx_speed', 0)
+                        speed_tx = last.get('tx_speed', 0)
                 else:
+                    # First check for this user - no speed calc yet
+                    delta_rx = delta_tx = delta_total = 0
                     speed_rx = speed_tx = 0
                 
                 # Log to traffic file
