@@ -44,9 +44,9 @@ class Settings(BaseSettings):
     DOMAIN: str = ""
     ADMIN_USER: str = ""
     
-    # Traffic monitoring interval (seconds)
-    TRAFFIC_CHECK_INTERVAL: int = 60
-    QUOTA_CHECK_INTERVAL: int = 30
+    # Traffic monitoring interval (seconds) - shorter for real-time accuracy
+    TRAFFIC_CHECK_INTERVAL: int = 10  # Check traffic every 10 seconds
+    QUOTA_CHECK_INTERVAL: int = 10    # Check quotas every 10 seconds
     
     model_config = SettingsConfigDict(
         env_file=".env",

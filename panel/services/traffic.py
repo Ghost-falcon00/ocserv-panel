@@ -28,12 +28,21 @@ class TrafficService:
         self._running = False
     
     async def update_user_traffic(self, session: AsyncSession):
-        """به‌روزرسانی ترافیک تمام کاربران آنلاین"""
+        """به‌روزرسانی ترافیک تمام کاربران آنلاین و اعمال فوری محدودیت‌ها"""
         try:
             online_users = await ocserv_service.get_online_users()
             
             for online_user in online_users:
                 username = online_user['username']
+                
+                # Get user from database
+                result = await session.execute(
+                    select(User).where(User.username == username)
+                )
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    continue
                 
                 # Get detailed traffic for this user
                 traffic = await ocserv_service.get_user_traffic(username)
@@ -44,21 +53,27 @@ class TrafficService:
                 last = self._last_traffic.get(username, {'rx': 0, 'tx': 0})
                 delta_rx = max(0, current_rx - last['rx'])
                 delta_tx = max(0, current_tx - last['tx'])
+                delta_total = delta_rx + delta_tx
                 
-                if delta_rx > 0 or delta_tx > 0:
+                if delta_total > 0:
                     # Update user's used_traffic
-                    stmt = (
-                        update(User)
-                        .where(User.username == username)
-                        .values(
-                            used_traffic=User.used_traffic + delta_rx + delta_tx,
-                            is_online=True,
-                            current_connections=1
-                        )
-                    )
-                    await session.execute(stmt)
+                    user.used_traffic += delta_total
+                    user.is_online = True
+                    user.current_connections = 1
                     
-                    logger.debug(f"Updated traffic for {username}: +{delta_rx + delta_tx} bytes")
+                    logger.debug(f"Traffic {username}: +{delta_total} bytes, total: {user.used_traffic}")
+                    
+                    # ═══════════════════════════════════════════════════════════
+                    # فوری: چک محدودیت و قطع کاربر اگه رد کرده
+                    # ═══════════════════════════════════════════════════════════
+                    if user.max_traffic > 0 and user.used_traffic >= user.max_traffic:
+                        logger.warning(f"User {username} EXCEEDED traffic limit! Disconnecting...")
+                        await ocserv_service.disconnect_user(username)
+                        await ocserv_service.lock_user(username)
+                        user.is_active = False
+                        user.is_online = False
+                        user.current_connections = 0
+                        logger.info(f"User {username} disconnected and locked - traffic exceeded")
                 
                 # Save current values for next check
                 self._last_traffic[username] = {'rx': current_rx, 'tx': current_tx}
@@ -68,7 +83,7 @@ class TrafficService:
             stmt = (
                 update(User)
                 .where(User.is_online == True)
-                .where(User.username.notin_(online_usernames))
+                .where(User.username.notin_(online_usernames) if online_usernames else True)
                 .values(is_online=False, current_connections=0)
             )
             await session.execute(stmt)
