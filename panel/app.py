@@ -191,6 +191,12 @@ async def logs_page(request: Request):
     return templates.TemplateResponse("logs.html", {"request": request})
 
 
+@app.get("/system-logs", response_class=HTMLResponse)
+async def system_logs_page(request: Request):
+    """صفحه لاگ سیستم"""
+    return templates.TemplateResponse("system_logs.html", {"request": request})
+
+
 # ========== Health Check ==========
 
 @app.get("/health")

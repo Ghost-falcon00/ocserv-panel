@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+
+{% block title %}لاگ سیستم | OCServ Panel{% endblock %}
+
+{% block page_title %}لاگ سیستم{% endblock %}
+
+{% block content %}
+<div class="system-logs-page">
+    <!-- Log Type Tabs -->
+    <div class="log-tabs">
+        <button class="log-tab active" data-type="panel" onclick="switchLogType('panel', this)">
+            🖥️ پنل
+        </button>
+        <button class="log-tab" data-type="ocserv" onclick="switchLogType('ocserv', this)">
+            🔌 OCServ
+        </button>
+        <button class="log-tab" data-type="traffic" onclick="switchLogType('traffic', this)">
+            📊 ترافیک
+        </button>
+        <button class="log-tab" data-type="connections" onclick="switchLogType('connections', this)">
+            🔗 اتصالات
+        </button>
+    </div>
+
+    <!-- Controls -->
+    <div class="log-controls">
+        <div class="log-filter">
+            <input type="text" id="log-search" placeholder="جستجو در لاگ..." oninput="filterLogs()">
+        </div>
+        <div class="log-actions">
+            <label class="toggle-wrapper">
+                <input type="checkbox" id="auto-scroll" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-text">اسکرول خودکار</span>
+            </label>
+            <label class="toggle-wrapper">
+                <input type="checkbox" id="live-mode" onchange="toggleLiveMode()">
+                <span class="toggle-slider"></span>
+                <span class="toggle-text">🔴 زنده</span>
+            </label>
+            <button class="btn btn-secondary" onclick="clearLogs()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+                پاک کردن
+            </button>
+            <button class="btn btn-primary" onclick="refreshLogs()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <polyline points="23 4 23 10 17 10" />
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+                بروزرسانی
+            </button>
+        </div>
+    </div>
+
+    <!-- Log Stats -->
+    <div class="log-stats">
+        <span id="log-count">0 خط</span>
+        <span id="log-size">-</span>
+    </div>
+
+    <!-- Log Viewer -->
+    <div class="log-viewer" id="log-viewer">
+        <div class="log-loading">
+            <div class="loading-spinner"></div>
+            <span>در حال بارگذاری...</span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentLogType = 'panel';
+    let eventSource = null;
+    let allLogs = [];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        checkAuth();
+        loadLogs('panel');
+        loadLogStats();
+    });
+
+    async function loadLogs(type) {
+        currentLogType = type;
+        const viewer = document.getElementById('log-viewer');
+        viewer.innerHTML = '<div class="log-loading"><div class="loading-spinner"></div><span>در حال بارگذاری...</span></div>';
+
+        try {
+            const data = await apiGet(`/api/logs/${type}?lines=200`);
+            allLogs = data.logs || [];
+            renderLogs();
+            document.getElementById('log-count').textContent = `${allLogs.length} خط`;
+        } catch (error) {
+            console.error('Error loading logs:', error);
+            viewer.innerHTML = '<div class="log-error">خطا در بارگذاری لاگ‌ها</div>';
+        }
+    }
+
+    function renderLogs() {
+        const viewer = document.getElementById('log-viewer');
+        const search = document.getElementById('log-search').value.toLowerCase();
+
+        let filteredLogs = allLogs;
+        if (search) {
+            filteredLogs = allLogs.filter(log => log.toLowerCase().includes(search));
+        }
+
+        if (filteredLogs.length === 0) {
+            viewer.innerHTML = '<div class="log-empty">لاگی یافت نشد</div>';
+            return;
+        }
+
+        viewer.innerHTML = filteredLogs.map(log => {
+            let logClass = 'log-line';
+            if (log.includes('ERROR') || log.includes('error')) logClass += ' log-error';
+            else if (log.includes('WARNING') || log.includes('warning')) logClass += ' log-warning';
+            else if (log.includes('INFO') || log.includes('info')) logClass += ' log-info';
+
+            return `<div class="${logClass}">${escapeHtml(log)}</div>`;
+        }).join('');
+
+        // Auto scroll
+        if (document.getElementById('auto-scroll').checked) {
+            viewer.scrollTop = viewer.scrollHeight;
+        }
+    }
+
+    function switchLogType(type, btn) {
+        // Update active tab
+        document.querySelectorAll('.log-tab').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Stop live mode if active
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+            document.getElementById('live-mode').checked = false;
+        }
+
+        loadLogs(type);
+    }
+
+    function filterLogs() {
+        renderLogs();
+    }
+
+    function clearLogs() {
+        allLogs = [];
+        renderLogs();
+        document.getElementById('log-count').textContent = '0 خط';
+    }
+
+    function refreshLogs() {
+        loadLogs(currentLogType);
+    }
+
+    function toggleLiveMode() {
+        const isLive = document.getElementById('live-mode').checked;
+
+        if (isLive) {
+            // Start SSE stream
+            const token = localStorage.getItem('access_token');
+            eventSource = new EventSource(`/api/logs/stream?log_type=${currentLogType}&token=${token}`);
+
+            eventSource.onmessage = (event) => {
+                if (event.data) {
+                    allLogs.push(event.data);
+                    // Keep only last 500 lines
+                    if (allLogs.length > 500) {
+                        allLogs = allLogs.slice(-500);
+                    }
+                    renderLogs();
+                    document.getElementById('log-count').textContent = `${allLogs.length} خط`;
+                }
+            };
+
+            eventSource.onerror = () => {
+                console.error('SSE connection error');
+                document.getElementById('live-mode').checked = false;
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+            };
+        } else {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+        }
+    }
+
+    async function loadLogStats() {
+        try {
+            const stats = await apiGet('/api/logs/stats');
+            let totalSize = 0;
+            Object.values(stats).forEach(s => totalSize += s.size);
+            document.getElementById('log-size').textContent = `حجم کل: ${formatBytes(totalSize)}`;
+        } catch (error) {
+            console.error('Error loading log stats:', error);
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+</script>
+{% endblock %}
