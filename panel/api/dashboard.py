@@ -290,3 +290,33 @@ async def get_alerts(
                 })
     
     return alerts
+
+
+# ========== Blocked IPs Management ==========
+
+@router.get("/blocked-ips")
+async def get_blocked_ips(
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """
+    لیست IP های بلاک شده
+    """
+    from services.quota import quota_service
+    return quota_service.get_blocked_ips()
+
+
+@router.post("/unblock-ip/{ip}")
+async def unblock_ip(
+    ip: str,
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """
+    رفع بلاک IP
+    """
+    from services.quota import quota_service
+    success = await quota_service.unblock_ip(ip)
+    
+    if success:
+        return {"status": "success", "message": f"IP {ip} آنبلاک شد"}
+    else:
+        return {"status": "error", "message": f"خطا در آنبلاک IP {ip}"}

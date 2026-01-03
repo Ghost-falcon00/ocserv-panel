@@ -25,12 +25,13 @@ class QuotaService:
     """
     
     def __init__(self):
-        self._blocked_ips = {}  # IP -> unblock_time
+        self._blocked_ips = {}  # IP -> {unblock_time, username, reason}
     
-    async def _temp_block_ip(self, ip: str, seconds: int = 300):
+    async def _temp_block_ip(self, ip: str, username: str = "", seconds: int = 86400):
         """
         بلاک موقت IP با iptables
         برای جلوگیری از reconnect فوری
+        پیشفرض: 1 روز (86400 ثانیه)
         """
         try:
             import subprocess
@@ -43,10 +44,17 @@ class QuotaService:
             cmd = f"iptables -I INPUT -s {ip} -p udp --dport 443 -j DROP"
             subprocess.run(cmd, shell=True, check=False)
             
-            logger.info(f"Temporarily blocked IP {ip} for {seconds} seconds")
+            logger.info(f"Blocked IP {ip} for {seconds} seconds (user: {username})")
+            
+            # Store block info
+            self._blocked_ips[ip] = {
+                "unblock_time": datetime.now() + timedelta(seconds=seconds),
+                "blocked_at": datetime.now(),
+                "username": username,
+                "reason": "excess_connections"
+            }
             
             # Schedule unblock
-            self._blocked_ips[ip] = datetime.now() + timedelta(seconds=seconds)
             asyncio.create_task(self._unblock_ip_later(ip, seconds))
             
         except Exception as e:
@@ -55,6 +63,10 @@ class QuotaService:
     async def _unblock_ip_later(self, ip: str, seconds: int):
         """رفع بلاک IP بعد از مدت مشخص"""
         await asyncio.sleep(seconds)
+        await self.unblock_ip(ip)
+    
+    async def unblock_ip(self, ip: str) -> bool:
+        """رفع بلاک IP - دستی یا خودکار"""
         try:
             import subprocess
             
@@ -69,8 +81,33 @@ class QuotaService:
                 del self._blocked_ips[ip]
             
             logger.info(f"Unblocked IP {ip}")
+            return True
         except Exception as e:
             logger.error(f"Error unblocking IP {ip}: {e}")
+            return False
+    
+    def get_blocked_ips(self) -> list:
+        """دریافت لیست IP های بلاک شده"""
+        result = []
+        now = datetime.now()
+        
+        for ip, info in list(self._blocked_ips.items()):
+            # Check if still blocked
+            if info["unblock_time"] > now:
+                remaining = (info["unblock_time"] - now).total_seconds()
+                result.append({
+                    "ip": ip,
+                    "username": info.get("username", ""),
+                    "blocked_at": info.get("blocked_at", now).isoformat(),
+                    "unblock_time": info["unblock_time"].isoformat(),
+                    "remaining_seconds": int(remaining),
+                    "reason": info.get("reason", "")
+                })
+            else:
+                # Expired, remove from dict
+                del self._blocked_ips[ip]
+        
+        return result
     
     async def check_quotas(self):
         """بررسی محدودیت‌های تمام کاربران"""
@@ -168,9 +205,9 @@ class QuotaService:
                                 if success:
                                     logger.info(f"Disconnected excess session {conn_id} for {username}")
                                     
-                                    # Temporarily block IP to prevent immediate reconnect
+                                    # Temporarily block IP to prevent immediate reconnect (1 day)
                                     if client_ip:
-                                        await self._temp_block_ip(client_ip, 300)  # 5 minutes
+                                        await self._temp_block_ip(client_ip, username, 86400)
                         
                         logger.warning(
                             f"User {username} had {len(connections)} connections, "

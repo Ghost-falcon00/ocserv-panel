@@ -117,6 +117,26 @@
             </div>
         </div>
 
+        <!-- Blocked IPs -->
+        <div class="card blocked-ips-card">
+            <div class="card-header">
+                <h3>🚫 IP های بلاک شده</h3>
+                <button class="btn-icon" onclick="loadBlockedIPs()" title="بروزرسانی">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                    </svg>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="blocked-ips-list" id="blocked-ips-list">
+                    <div class="empty-state small">
+                        <p>هیچ IP بلاک شده‌ای نیست</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Recent Connections -->
         <div class="card">
             <div class="card-header">
@@ -155,6 +175,7 @@
             loadStats(),
             loadOnlineUsers(),
             loadAlerts(),
+            loadBlockedIPs(),
             loadRecentConnections(),
             loadTrafficChart()
         ]);
@@ -359,6 +380,58 @@
         } catch (error) {
             showToast('خطا در قطع اتصال', 'error');
         }
+    }
+
+    async function loadBlockedIPs() {
+        try {
+            const ips = await apiGet('/api/dashboard/blocked-ips');
+            const container = document.getElementById('blocked-ips-list');
+
+            if (ips.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state small">
+                        <p>هیچ IP بلاک شده‌ای نیست</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = ips.map(ip => `
+                <div class="blocked-ip-item">
+                    <div class="ip-info">
+                        <span class="ip-address">🚫 ${ip.ip}</span>
+                        <span class="ip-user">کاربر: ${ip.username || '-'}</span>
+                        <span class="ip-remaining">باقیمانده: ${formatDuration(ip.remaining_seconds)}</span>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="unblockIP('${ip.ip}')">
+                        آنبلاک
+                    </button>
+                </div>
+            `).join('');
+        } catch (error) {
+            console.error('Error loading blocked IPs:', error);
+        }
+    }
+
+    async function unblockIP(ip) {
+        if (!confirm(`آیا از آنبلاک ${ip} مطمئن هستید؟`)) return;
+
+        try {
+            await apiPost(`/api/dashboard/unblock-ip/${ip}`);
+            showToast(`IP ${ip} آنبلاک شد`, 'success');
+            loadBlockedIPs();
+        } catch (error) {
+            showToast('خطا در آنبلاک', 'error');
+        }
+    }
+
+    function formatDuration(seconds) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (hours > 0) {
+            return `${hours} ساعت و ${minutes} دقیقه`;
+        }
+        return `${minutes} دقیقه`;
     }
 </script>
 {% endblock %}
