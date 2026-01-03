@@ -28,12 +28,10 @@ from api import (
     blocking_router,
     routes_router
 )
+from services.logging_service import setup_logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging with file rotation
+setup_logging()
 logger = logging.getLogger(__name__)
 
 

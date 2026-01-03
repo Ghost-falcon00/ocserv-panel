@@ -457,6 +457,10 @@ EOF
     # Create data directory
     mkdir -p panel/data
     
+    # Create logs directory
+    mkdir -p panel/logs
+    chmod 755 panel/logs
+    
     # Copy connect script to OCServ
     cp scripts/check_blocked.sh /etc/ocserv/check_blocked.sh
     chmod +x /etc/ocserv/check_blocked.sh

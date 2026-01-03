@@ -96,13 +96,33 @@ class LogReader:
         """خواندن لاگ OCServ از journalctl"""
         import subprocess
         try:
+            # Use full path to journalctl
             result = subprocess.run(
-                ["journalctl", "-u", "ocserv", "-n", str(lines), "--no-pager", "-o", "short"],
+                ["/usr/bin/journalctl", "-u", "ocserv", "-n", str(lines), "--no-pager", "-o", "short"],
                 capture_output=True,
                 text=True,
                 timeout=5
             )
-            return result.stdout.strip().split("\n") if result.stdout else []
+            if result.stdout:
+                return result.stdout.strip().split("\n")
+            elif result.stderr:
+                return [f"journalctl stderr: {result.stderr}"]
+            return ["هیچ لاگی یافت نشد"]
+        except FileNotFoundError:
+            # Try reading from syslog instead
+            try:
+                result = subprocess.run(
+                    ["grep", "ocserv", "/var/log/syslog"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.stdout:
+                    lines_list = result.stdout.strip().split("\n")
+                    return lines_list[-lines:]
+            except:
+                pass
+            return ["journalctl در دسترس نیست - لاگ OCServ قابل خواندن نیست"]
         except Exception as e:
             return [f"Error reading OCServ logs: {e}"]
     
