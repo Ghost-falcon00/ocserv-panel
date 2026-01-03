@@ -75,6 +75,15 @@ class QuotaService:
         await asyncio.sleep(seconds)
         await self.unblock_ip(ip)
     
+    async def _unlock_user_later(self, username: str, seconds: int):
+        """آنلاک کاربر بعد از مدت مشخص"""
+        await asyncio.sleep(seconds)
+        try:
+            await ocserv_service.unlock_user(username)
+            logger.info(f"Auto-unlocked user {username} after {seconds} seconds")
+        except Exception as e:
+            logger.error(f"Error unlocking user {username}: {e}")
+    
     async def unblock_ip(self, ip: str) -> bool:
         """رفع بلاک IP - دستی یا خودکار"""
         try:
@@ -205,23 +214,25 @@ class QuotaService:
                         excess_count = len(connections) - user.max_connections
                         connections_to_disconnect = connections[:excess_count]
                         
+                        # First, LOCK the user to prevent ANY reconnection
+                        await ocserv_service.lock_user(username)
+                        logger.info(f"Temporarily locked user {username} for excess connections")
+                        
+                        # Disconnect ALL sessions of this user
+                        await ocserv_service.disconnect_user(username)
+                        
+                        # Also block the IP for good measure
                         for conn in connections_to_disconnect:
-                            conn_id = conn.get("id")
                             client_ip = conn.get("client_ip")
-                            
-                            if conn_id:
-                                # Disconnect the session
-                                success = await ocserv_service.disconnect_by_id(conn_id)
-                                if success:
-                                    logger.info(f"Disconnected excess session {conn_id} for {username}")
-                                    
-                                    # Temporarily block IP to prevent immediate reconnect (1 day)
-                                    if client_ip:
-                                        await self._temp_block_ip(client_ip, username, 86400)
+                            if client_ip:
+                                await self._temp_block_ip(client_ip, username, 86400)
+                        
+                        # Schedule unlock after 60 seconds
+                        asyncio.create_task(self._unlock_user_later(username, 60))
                         
                         logger.warning(
                             f"User {username} had {len(connections)} connections, "
-                            f"max allowed is {user.max_connections}"
+                            f"max allowed is {user.max_connections}. Locked for 60 seconds."
                         )
                 
             except Exception as e:
