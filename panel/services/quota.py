@@ -210,29 +210,31 @@ class QuotaService:
                     user = result.scalar_one_or_none()
                     
                     if user and len(connections) > user.max_connections:
-                        # قطع اتصالات اضافی (قدیمی‌ترین‌ها)
+                        # Sort connections by ID (higher ID = newer connection)
+                        sorted_connections = sorted(connections, key=lambda x: x.get("id", 0))
+                        
+                        # قطع اتصالات جدید (آخرین‌ها) - نه قدیمی‌ها
                         excess_count = len(connections) - user.max_connections
-                        connections_to_disconnect = connections[:excess_count]
+                        # Take the LAST (newest) connections to disconnect
+                        connections_to_disconnect = sorted_connections[-excess_count:]
                         
-                        # First, LOCK the user to prevent ANY reconnection
-                        await ocserv_service.lock_user(username)
-                        logger.info(f"Temporarily locked user {username} for excess connections")
-                        
-                        # Disconnect ALL sessions of this user
-                        await ocserv_service.disconnect_user(username)
-                        
-                        # Also block the IP for good measure
                         for conn in connections_to_disconnect:
+                            conn_id = conn.get("id")
                             client_ip = conn.get("client_ip")
-                            if client_ip:
-                                await self._temp_block_ip(client_ip, username, 86400)
-                        
-                        # Schedule unlock after 60 seconds
-                        asyncio.create_task(self._unlock_user_later(username, 60))
+                            
+                            if conn_id:
+                                # Disconnect only this specific session
+                                success = await ocserv_service.disconnect_by_id(conn_id)
+                                if success:
+                                    logger.info(f"Disconnected NEWEST session {conn_id} for {username}")
+                                    
+                                    # Block the IP of this NEW connection for 1 day
+                                    if client_ip:
+                                        await self._temp_block_ip(client_ip, username, 86400)
                         
                         logger.warning(
                             f"User {username} had {len(connections)} connections, "
-                            f"max allowed is {user.max_connections}. Locked for 60 seconds."
+                            f"max allowed is {user.max_connections}. Disconnected {excess_count} newest."
                         )
                 
             except Exception as e:
