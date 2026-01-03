@@ -55,18 +55,22 @@ class OCServService:
             # Check if passwd file exists - don't use -c if it does (it would overwrite!)
             use_create_flag = not os.path.exists(self.passwd_file) or os.path.getsize(self.passwd_file) == 0
             
-            # Use echo to pipe password to ocpasswd
+            # Build command
             if use_create_flag:
-                cmd = f'echo -e "{password}\\n{password}" | {self.ocpasswd} -c {self.passwd_file} {username}'
+                cmd = [self.ocpasswd, "-c", self.passwd_file, username]
             else:
-                cmd = f'echo -e "{password}\\n{password}" | {self.ocpasswd} {self.passwd_file} {username}'
+                cmd = [self.ocpasswd, self.passwd_file, username]
             
-            process = await asyncio.create_subprocess_shell(
-                cmd,
+            # Use stdin to pass password (more reliable than echo)
+            password_input = f"{password}\n{password}\n"
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            _, stderr = await process.communicate()
+            stdout, stderr = await process.communicate(input=password_input.encode())
             
             if process.returncode == 0:
                 logger.info(f"User {username} added successfully")
@@ -81,7 +85,8 @@ class OCServService:
     async def delete_user(self, username: str) -> bool:
         """حذف کاربر از OCServ"""
         try:
-            cmd = [self.ocpasswd, "-c", self.passwd_file, "-d", username]
+            # Don't use -c flag for delete - it would wipe the file!
+            cmd = [self.ocpasswd, "-d", username]
             returncode, _, stderr = await self._run_command(cmd)
             
             if returncode == 0:
