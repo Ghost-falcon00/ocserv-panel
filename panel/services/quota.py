@@ -111,10 +111,12 @@ class QuotaService:
                         connections_to_disconnect = connections[:excess_count]
                         
                         for conn in connections_to_disconnect:
-                            session_id = conn.get("session_id")
-                            if session_id:
-                                await ocserv_service.disconnect_session(session_id)
-                                logger.info(f"Disconnected excess session for {username}")
+                            # Use 'id' not 'session_id'
+                            conn_id = conn.get("id")
+                            if conn_id:
+                                success = await ocserv_service.disconnect_by_id(conn_id)
+                                if success:
+                                    logger.info(f"Disconnected excess session {conn_id} for {username}")
                         
                         logger.warning(
                             f"User {username} had {len(connections)} connections, "
