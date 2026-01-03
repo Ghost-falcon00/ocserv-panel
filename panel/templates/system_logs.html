@@ -263,10 +263,10 @@
         // If live monitor - auto-start refresh
         if (type === 'live') {
             loadLogs(type);
-            // Auto refresh every 3 seconds
+            // Auto refresh every 1 second for real-time
             liveMonitorInterval = setInterval(() => {
                 loadLiveTraffic();
-            }, 3000);
+            }, 1000);
         } else {
             loadLogs(type);
         }
