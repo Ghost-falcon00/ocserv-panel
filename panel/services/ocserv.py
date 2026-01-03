@@ -51,8 +51,16 @@ class OCServService:
         از ocpasswd برای مدیریت فایل رمز عبور استفاده می‌کند
         """
         try:
+            import os
+            # Check if passwd file exists - don't use -c if it does (it would overwrite!)
+            use_create_flag = not os.path.exists(self.passwd_file) or os.path.getsize(self.passwd_file) == 0
+            
             # Use echo to pipe password to ocpasswd
-            cmd = f'echo -e "{password}\\n{password}" | {self.ocpasswd} -c {self.passwd_file} {username}'
+            if use_create_flag:
+                cmd = f'echo -e "{password}\\n{password}" | {self.ocpasswd} -c {self.passwd_file} {username}'
+            else:
+                cmd = f'echo -e "{password}\\n{password}" | {self.ocpasswd} {self.passwd_file} {username}'
+            
             process = await asyncio.create_subprocess_shell(
                 cmd,
                 stdout=asyncio.subprocess.PIPE,
