@@ -219,16 +219,21 @@ class OCServService:
                 return {"rx": 0, "tx": 0}
             
             rx, tx = 0, 0
-            for line in stdout.split('\n'):
-                if 'RX' in line:
-                    match = re.search(r'(\d+)', line)
-                    if match:
-                        rx = int(match.group(1))
-                elif 'TX' in line:
-                    match = re.search(r'(\d+)', line)
-                    if match:
-                        tx = int(match.group(1))
             
+            # Format: "RX: 259301 (259.3 KB)   TX: 421742 (421.7 KB)"
+            # RX and TX may be on the same line or separate lines
+            for line in stdout.split('\n'):
+                # Look for RX: followed by number
+                rx_match = re.search(r'RX:\s*(\d+)', line)
+                if rx_match:
+                    rx = int(rx_match.group(1))
+                
+                # Look for TX: followed by number
+                tx_match = re.search(r'TX:\s*(\d+)', line)
+                if tx_match:
+                    tx = int(tx_match.group(1))
+            
+            logger.debug(f"Traffic for {username}: RX={rx}, TX={tx}")
             return {"rx": rx, "tx": tx}
         except Exception as e:
             logger.error(f"Error getting traffic for {username}: {e}")
