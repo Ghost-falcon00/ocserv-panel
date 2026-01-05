@@ -673,22 +673,20 @@ a:hover {
     color: var(--text-secondary);
 }
 
-/* Last Seen & Status Group */
+/* Last Seen Badge */
 .last-seen {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: var(--text-muted);
-    display: block;
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: 12px;
+    display: inline-block;
     margin-top: 4px;
 }
 
-.status-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.status-group .toggle-wrapper {
-    margin-top: 4px;
+/* Modal Toggle */
+.modal-toggle {
+    margin-top: 8px;
 }
 
 .form-row {

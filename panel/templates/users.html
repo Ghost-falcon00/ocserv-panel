@@ -89,7 +89,6 @@
                     <label for="user-username">نام کاربری</label>
                     <input type="text" id="user-username" required minlength="3" maxlength="50">
                 </div>
-
                 <div class="form-group">
                     <label for="user-password">رمز عبور</label>
                     <input type="text" id="user-password" minlength="4">
@@ -109,7 +108,6 @@
                     </div>
                     <small class="form-hint">۰ = نامحدود</small>
                 </div>
-
                 <div class="form-group">
                     <label for="user-days">مدت اعتبار (روز)</label>
                     <input type="number" id="user-days" min="0" value="30" placeholder="تعداد روز">
@@ -117,34 +115,32 @@
                 </div>
             </div>
 
-            <div class="form-group">
-                <label for="user-connections">حداکثر اتصال همزمان</label>
-                <input type="number" id="user-connections" min="1" value="2">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="user-connections">حداکثر اتصال همزمان</label>
+                    <input type="number" id="user-connections" min="1" value="2">
+                </div>
+                <div class="form-group">
+                    <label>وضعیت</label>
+                    <label class="toggle-wrapper modal-toggle">
+                        <input type="checkbox" id="user-active" checked>
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-text">فعال</span>
+                    </label>
+                </div>
             </div>
-    </div>
 
-    <div class="form-row">
-        <div class="form-group status-group">
-            <label>وضعیت</label>
-            <label class="toggle-wrapper">
-                <input type="checkbox" id="user-active" checked>
-                <span class="toggle-slider"></span>
-                <span class="toggle-text">فعال</span>
-            </label>
-        </div>
-    </div>
+            <div class="form-group">
+                <label for="user-note">یادداشت</label>
+                <textarea id="user-note" rows="2"></textarea>
+            </div>
 
-    <div class="form-group">
-        <label for="user-note">یادداشت</label>
-        <textarea id="user-note" rows="2"></textarea>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-primary">ذخیره</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">انصراف</button>
+            </div>
+        </form>
     </div>
-
-    <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" onclick="closeModal()">انصراف</button>
-        <button type="submit" class="btn btn-primary">ذخیره</button>
-    </div>
-    </form>
-</div>
 </div>
 {% endblock %}
 
