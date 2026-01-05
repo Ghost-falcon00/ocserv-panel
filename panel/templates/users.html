@@ -117,35 +117,34 @@
                 </div>
             </div>
 
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="user-connections">حداکثر اتصال همزمان</label>
-                    <input type="number" id="user-connections" min="1" value="2">
-                </div>
-
-                <div class="form-group">
-                    <label>وضعیت</label>
-                    <div class="toggle-container">
-                        <label class="toggle-wrapper">
-                            <input type="checkbox" id="user-active" checked>
-                            <span class="toggle-slider"></span>
-                            <span class="toggle-text">فعال</span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-
             <div class="form-group">
-                <label for="user-note">یادداشت</label>
-                <textarea id="user-note" rows="2"></textarea>
+                <label for="user-connections">حداکثر اتصال همزمان</label>
+                <input type="number" id="user-connections" min="1" value="2">
             </div>
-
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal()">انصراف</button>
-                <button type="submit" class="btn btn-primary">ذخیره</button>
-            </div>
-        </form>
     </div>
+
+    <div class="form-row">
+        <div class="form-group status-group">
+            <label>وضعیت</label>
+            <label class="toggle-wrapper">
+                <input type="checkbox" id="user-active" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-text">فعال</span>
+            </label>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="user-note">یادداشت</label>
+        <textarea id="user-note" rows="2"></textarea>
+    </div>
+
+    <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">انصراف</button>
+        <button type="submit" class="btn btn-primary">ذخیره</button>
+    </div>
+    </form>
+</div>
 </div>
 {% endblock %}
 
@@ -209,7 +208,8 @@
                 <span class="status-badge ${user.is_active ? 'active' : 'inactive'}">
                     ${user.is_active ? 'فعال' : 'غیرفعال'}
                 </span>
-                ${user.is_online ? '<span class="status-badge online">آنلاین</span>' : ''}
+                ${user.is_online ? '<span class="status-badge online">آنلاین</span>' :
+                (user.last_connection ? `<span class="last-seen">${formatTimeAgo(user.last_connection)}</span>` : '')}
             </td>
             <td>
                 <div class="traffic-cell">
@@ -292,6 +292,24 @@
         loadUsers();
     }
 
+    function formatTimeAgo(dateStr) {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diff = now - date;
+
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+
+        if (minutes < 1) return 'همین الان';
+        if (minutes < 60) return `${minutes} دقیقه قبل`;
+        if (hours < 24) return `${hours} ساعت قبل`;
+        if (days < 7) return `${days} روز قبل`;
+        if (days < 30) return `${Math.floor(days / 7)} هفته قبل`;
+        return `${Math.floor(days / 30)} ماه قبل`;
+    }
+
     function showAddUserModal() {
         document.getElementById('modal-title').textContent = 'کاربر جدید';
         document.getElementById('user-form').reset();
@@ -319,15 +337,8 @@
             document.getElementById('user-traffic').value = trafficGB;
             document.getElementById('traffic-unit').value = '1073741824';
 
-            // Calculate remaining days from expire_date
-            if (user.expire_date) {
-                const expDate = new Date(user.expire_date);
-                const now = new Date();
-                const diffDays = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
-                document.getElementById('user-days').value = Math.max(0, diffDays);
-            } else {
-                document.getElementById('user-days').value = 0;
-            }
+            // Use expire_days from DB directly (not calculated from remaining)
+            document.getElementById('user-days').value = user.expire_days || 0;
 
             document.getElementById('user-connections').value = user.max_connections;
             document.getElementById('user-active').checked = user.is_active;
