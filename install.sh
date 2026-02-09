@@ -538,8 +538,20 @@ setup_panel() {
     mkdir -p $PANEL_DIR
     cd $PANEL_DIR
     
-    # Clone from GitHub
-    git clone --depth 1 https://github.com/Ghost-falcon00/ocserv-panel.git .
+    # Clone from GitHub with Proxy fallback
+    log_info "Cloning panel repository..."
+    if git clone --depth 1 https://github.com/Ghost-falcon00/ocserv-panel.git .; then
+        log_success "Cloned from GitHub"
+    else
+        log_warning "GitHub clone failed. Trying via GH Proxy..."
+        if git clone --depth 1 https://gh-proxy.com/github.com/Ghost-falcon00/ocserv-panel.git .; then
+            log_success "Cloned via GH Proxy"
+        else
+            log_error "Failed to clone panel. Please check internet connection or upload files manually to $PANEL_DIR"
+            log_info "Manual install: Upload all files to $PANEL_DIR and run this script again."
+            exit 1
+        fi
+    fi
     
     # Create virtual environment
     python3 -m venv venv
