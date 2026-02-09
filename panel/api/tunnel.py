@@ -1,11 +1,11 @@
 """
-Tunnel API
-API مدیریت تانل برای عبور از فیلترینگ
+Tunnel API - Advanced Anti-Detection
+API مدیریت تانل پیشرفته با قابلیت‌های ضد شناسایی
 """
 
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, IPvAnyAddress
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel
 from models.admin import Admin
 from api.auth import get_current_admin
 from services.tunnel import tunnel_service
@@ -16,12 +16,15 @@ router = APIRouter(prefix="/api/tunnel", tags=["Tunnel"])
 # ========== Schemas ==========
 
 class TunnelConfig(BaseModel):
-    """تنظیمات تانل"""
+    """تنظیمات تانل پیشرفته"""
     remote_ip: str
     remote_port: int = 2083
     local_port: int = 443
-    protocol: str = "relay+tls"
+    protocol: str = "h2"  # h2, wss, tls
     sni: str = "www.google.com"
+    obfuscation: str = "tls"
+    mux: bool = True  # Multiplexing
+    padding: bool = True  # Random padding
 
 
 class TunnelStatus(BaseModel):
@@ -46,6 +49,11 @@ class ConnectionTest(BaseModel):
     error: Optional[str] = None
 
 
+class SNIList(BaseModel):
+    """لیست SNI های امن"""
+    sni_list: List[str]
+
+
 # ========== Endpoints ==========
 
 @router.get("/status", response_model=TunnelStatus)
@@ -56,6 +64,7 @@ async def get_tunnel_status(
     دریافت وضعیت تانل
     
     نمایش وضعیت نصب، اجرا، و تنظیمات فعلی
+    شامل اطلاعات multiplexing و padding
     """
     status = await tunnel_service.get_status()
     return TunnelStatus(**status)
@@ -65,9 +74,18 @@ async def get_tunnel_status(
 async def get_tunnel_config(
     current_admin: Admin = Depends(get_current_admin)
 ):
-    """دریافت تنظیمات فعلی تانل"""
+    """دریافت تنظیمات فعلی تانل شامل گزینه‌های anti-detection"""
     config = await tunnel_service.get_config()
-    return TunnelConfig(**config)
+    return TunnelConfig(
+        remote_ip=config.get("remote_ip", ""),
+        remote_port=config.get("remote_port", 2083),
+        local_port=config.get("local_port", 443),
+        protocol=config.get("protocol", "h2"),
+        sni=config.get("sni", "www.google.com"),
+        obfuscation=config.get("obfuscation", "tls"),
+        mux=config.get("mux", True),
+        padding=config.get("padding", True)
+    )
 
 
 @router.put("/config", response_model=TunnelResponse)
@@ -76,22 +94,27 @@ async def update_tunnel_config(
     current_admin: Admin = Depends(get_current_admin)
 ):
     """
-    به‌روزرسانی تنظیمات تانل
+    به‌روزرسانی تنظیمات تانل با قابلیت‌های ضد شناسایی
     
-    تنظیم IP سرور فرانسه، پورت، پروتکل و SNI
+    - protocol: h2 (HTTP/2 - پیشنهادی), wss (WebSocket), tls
+    - mux: Multiplexing برای پنهان کردن پترن ترافیک
+    - padding: Random padding برای جلوگیری از تحلیل اندازه پکت
     """
     success = await tunnel_service.update_config(
         remote_ip=config.remote_ip,
         remote_port=config.remote_port,
         local_port=config.local_port,
         protocol=config.protocol,
-        sni=config.sni
+        sni=config.sni,
+        obfuscation=config.obfuscation,
+        mux=config.mux,
+        padding=config.padding
     )
     
     if success:
         return TunnelResponse(
             success=True,
-            message="تنظیمات تانل با موفقیت ذخیره شد"
+            message="تنظیمات تانل با موفقیت ذخیره شد (قابلیت‌های ضد شناسایی فعال)"
         )
     else:
         raise HTTPException(
@@ -105,11 +128,12 @@ async def start_tunnel(
     current_admin: Admin = Depends(get_current_admin)
 ):
     """
-    شروع تانل
+    شروع تانل با قابلیت‌های ضد شناسایی
     
-    اگر Gost نصب نباشد، ابتدا نصب می‌شود
+    - نصب خودکار Gost
+    - اعمال تنظیمات stealth به OCServ
+    - فعال‌سازی TLS fingerprint mimicry
     """
-    # بررسی تنظیمات
     config = await tunnel_service.get_config()
     if not config.get("remote_ip"):
         raise HTTPException(
@@ -122,7 +146,7 @@ async def start_tunnel(
     if success:
         return TunnelResponse(
             success=True,
-            message="تانل با موفقیت شروع شد"
+            message="تانل امن با قابلیت‌های ضد شناسایی شروع شد"
         )
     else:
         raise HTTPException(
@@ -171,14 +195,14 @@ async def restart_tunnel(
 
 @router.post("/test", response_model=ConnectionTest)
 async def test_connection(
-    remote_ip: str,
-    remote_port: int = 2083,
+    remote_ip: str = Query(..., description="IP سرور فرانسه"),
+    remote_port: int = Query(2083, description="پورت OCServ"),
     current_admin: Admin = Depends(get_current_admin)
 ):
     """
     تست اتصال به سرور فرانسه
     
-    بررسی دسترسی و اندازه‌گیری تأخیر
+    با شبیه‌سازی درخواست مرورگر واقعی
     """
     result = await tunnel_service.test_connection(remote_ip, remote_port)
     return ConnectionTest(**result)
@@ -188,11 +212,7 @@ async def test_connection(
 async def install_gost(
     current_admin: Admin = Depends(get_current_admin)
 ):
-    """
-    نصب Gost
-    
-    دانلود و نصب آخرین نسخه Gost
-    """
+    """نصب Gost با تنظیمات امنیتی"""
     if await tunnel_service.is_gost_installed():
         return TunnelResponse(
             success=True,
@@ -210,4 +230,41 @@ async def install_gost(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="خطا در نصب Gost"
+        )
+
+
+@router.get("/sni-list", response_model=SNIList)
+async def get_sni_list(
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """
+    دریافت لیست SNI های امن
+    
+    سایت‌های محبوب که فیلتر نمی‌شوند
+    """
+    return SNIList(sni_list=tunnel_service.get_safe_sni_list())
+
+
+@router.post("/apply-stealth", response_model=TunnelResponse)
+async def apply_stealth_config(
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """
+    اعمال تنظیمات ضد شناسایی به OCServ
+    
+    - تغییر هدرها به شبیه nginx
+    - غیرفعال کردن امضای Cisco
+    - فعال‌سازی TLS 1.3
+    """
+    success = await tunnel_service.apply_ocserv_stealth()
+    
+    if success:
+        return TunnelResponse(
+            success=True,
+            message="تنظیمات ضد شناسایی به OCServ اعمال شد"
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="خطا در اعمال تنظیمات ضد شناسایی"
         )

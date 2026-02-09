@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}تانل - OCServ Panel{% endblock %}
+{% block title %}تانل ضد فیلتر - OCServ Panel{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h1>مدیریت تانل</h1>
-    <p class="page-description">اتصال امن و ضد فیلتر به سرور خارجی</p>
+    <h1>🔒 تانل ضد فیلتر</h1>
+    <p class="page-description">اتصال امن و غیرقابل شناسایی به سرور خارجی</p>
 </div>
 
 <!-- Status Card -->
@@ -34,16 +34,63 @@
             </svg>
             توقف
         </button>
+        <button class="btn btn-secondary" id="stealth-btn" onclick="applyStealthConfig()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            اعمال Stealth
+        </button>
+    </div>
+</div>
+
+<!-- Security Features Card -->
+<div class="card security-card">
+    <div class="card-header">
+        <h2>🛡️ قابلیت‌های ضد شناسایی</h2>
+    </div>
+    <div class="card-body">
+        <div class="security-features">
+            <div class="feature-item active">
+                <div class="feature-icon">🔐</div>
+                <div class="feature-info">
+                    <h4>TLS 1.3</h4>
+                    <p>رمزنگاری پیشرفته</p>
+                </div>
+            </div>
+            <div class="feature-item active">
+                <div class="feature-icon">🌐</div>
+                <div class="feature-info">
+                    <h4>HTTP/2 Mux</h4>
+                    <p>پنهان‌سازی پترن</p>
+                </div>
+            </div>
+            <div class="feature-item active">
+                <div class="feature-icon">📦</div>
+                <div class="feature-info">
+                    <h4>Padding</h4>
+                    <p>اندازه تصادفی پکت</p>
+                </div>
+            </div>
+            <div class="feature-item active">
+                <div class="feature-icon">🎭</div>
+                <div class="feature-info">
+                    <h4>SNI Masquerade</h4>
+                    <p>شبیه‌سازی سایت معتبر</p>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
 <!-- Configuration Card -->
 <div class="card">
     <div class="card-header">
-        <h2>تنظیمات سرور فرانسه</h2>
+        <h2>⚙️ تنظیمات تانل</h2>
     </div>
     <div class="card-body">
         <form id="tunnel-config-form" onsubmit="saveTunnelConfig(event)">
+            <!-- Server Settings -->
+            <h3 class="section-title">📡 تنظیمات سرور</h3>
             <div class="form-row">
                 <div class="form-group">
                     <label for="remote_ip">آی‌پی سرور فرانسه</label>
@@ -61,24 +108,7 @@
                 <div class="form-group">
                     <label for="local_port">پورت ورودی (ایران)</label>
                     <input type="number" id="local_port" name="local_port" value="443" min="1" max="65535">
-                    <small>پورتی که کلاینت‌ها بهش وصل میشن (443 بهترین انتخابه)</small>
-                </div>
-                <div class="form-group">
-                    <label for="protocol">پروتکل تانل</label>
-                    <select id="protocol" name="protocol">
-                        <option value="relay+tls">TLS (پیشنهادی - سریع و امن)</option>
-                        <option value="relay+wss">WebSocket Secure</option>
-                        <option value="relay">بدون رمزنگاری اضافه</option>
-                    </select>
-                    <small>TLS بهترین انتخاب برای عبور از فیلترینگ</small>
-                </div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="sni">SNI (Server Name Indication)</label>
-                    <input type="text" id="sni" name="sni" value="www.google.com" placeholder="www.google.com">
-                    <small>سایتی که ترافیک شما شبیه اون به نظر میرسه</small>
+                    <small>پورتی که کلاینت‌ها بهش وصل میشن (443 بهترین)</small>
                 </div>
                 <div class="form-group">
                     <label>&nbsp;</label>
@@ -89,6 +119,58 @@
                         </svg>
                         تست اتصال
                     </button>
+                </div>
+            </div>
+
+            <!-- Anti-Detection Settings -->
+            <h3 class="section-title">🔒 تنظیمات ضد شناسایی</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="protocol">پروتکل تانل</label>
+                    <select id="protocol" name="protocol">
+                        <option value="h2">HTTP/2 (پیشنهادی - سریع و مخفی)</option>
+                        <option value="wss">WebSocket Secure (شبیه وب)</option>
+                        <option value="tls">TLS خالص (ساده)</option>
+                    </select>
+                    <small>HTTP/2 بهترین انتخاب برای عبور از DPI</small>
+                </div>
+                <div class="form-group">
+                    <label for="sni">SNI (Server Name Indication)</label>
+                    <select id="sni" name="sni">
+                        <option value="www.google.com">www.google.com</option>
+                        <option value="www.cloudflare.com">www.cloudflare.com</option>
+                        <option value="www.microsoft.com">www.microsoft.com</option>
+                        <option value="www.apple.com">www.apple.com</option>
+                        <option value="www.amazon.com">www.amazon.com</option>
+                        <option value="www.github.com">www.github.com</option>
+                        <option value="update.microsoft.com">update.microsoft.com</option>
+                        <option value="dl.google.com">dl.google.com</option>
+                    </select>
+                    <small>سایتی که ترافیک شما شبیه اون به نظر میرسه</small>
+                </div>
+            </div>
+
+            <!-- Advanced Options -->
+            <div class="form-row advanced-options">
+                <div class="form-group checkbox-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="mux" name="mux" checked>
+                        <span class="toggle-switch"></span>
+                        <span class="toggle-text">
+                            <strong>Multiplexing</strong>
+                            <small>چند جریان در یک اتصال (پنهان‌سازی پترن)</small>
+                        </span>
+                    </label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label class="toggle-label">
+                        <input type="checkbox" id="padding" name="padding" checked>
+                        <span class="toggle-switch"></span>
+                        <span class="toggle-text">
+                            <strong>Random Padding</strong>
+                            <small>اضافه کردن داده‌های تصادفی به پکت‌ها</small>
+                        </span>
+                    </label>
                 </div>
             </div>
 
@@ -122,25 +204,32 @@
 <!-- Help Section -->
 <div class="card help-card">
     <div class="card-header">
-        <h2>راهنما</h2>
+        <h2>📖 راهنما</h2>
     </div>
     <div class="card-body">
         <div class="help-section">
             <h4>🔧 نحوه تنظیم:</h4>
             <ol>
-                <li>IP سرور فرانسه رو وارد کن (سروری که OCServ روش نصبه)</li>
-                <li>پورت OCServ رو بزن (معمولاً 2083 یا 443)</li>
-                <li>دکمه "تست اتصال" رو بزن تا مطمئن شی سرور در دسترسه</li>
-                <li>تنظیمات رو ذخیره کن و "شروع" رو بزن</li>
+                <li>IP سرور فرانسه رو وارد کن</li>
+                <li>دکمه "تست اتصال" رو بزن</li>
+                <li>پروتکل <strong>HTTP/2</strong> رو انتخاب کن (سریع‌تر و امن‌تر)</li>
+                <li>یه SNI انتخاب کن (ترافیکت شبیه اون سایت میشه)</li>
+                <li><strong>Multiplexing</strong> و <strong>Padding</strong> رو فعال بذار</li>
+                <li>ذخیره کن و "شروع" رو بزن</li>
             </ol>
         </div>
-        <div class="help-section">
-            <h4>📱 اتصال کلاینت‌ها:</h4>
-            <p>بعد از فعال‌سازی تانل، کلاینت‌ها باید به <strong>IP سرور ایران:443</strong> وصل شن (نه فرانسه!)</p>
+        <div class="help-section success">
+            <h4>✅ چرا این تنظیمات امن‌ترن؟</h4>
+            <ul>
+                <li><strong>HTTP/2:</strong> ترافیکت مثل یه سایت عادی به نظر میرسه</li>
+                <li><strong>SNI Masquerade:</strong> فیلترچی فکر میکنه داری گوگل رو باز میکنی</li>
+                <li><strong>Multiplexing:</strong> پترن ترافیک VPN رو مخفی میکنه</li>
+                <li><strong>Padding:</strong> سایز پکت‌ها تصادفی میشه</li>
+            </ul>
         </div>
         <div class="help-section warning">
             <h4>⚠️ نکته مهم:</h4>
-            <p>برای کار کردن تانل، باید روی سرور فرانسه هم اسکریپت مخصوص رو اجرا کنی.</p>
+            <p>بعد از تنظیم، کلاینت‌ها باید به <strong>IP سرور ایران:443</strong> وصل شن.</p>
         </div>
     </div>
 </div>
@@ -195,12 +284,7 @@
         stroke: #ef4444;
     }
 
-    .status-icon.loading {
-        background: rgba(234, 179, 8, 0.2);
-    }
-
     .status-icon.loading svg {
-        stroke: #eab308;
         animation: spin 1s linear infinite;
     }
 
@@ -241,6 +325,62 @@
     .status-actions {
         display: flex;
         gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    /* Security Features */
+    .security-card {
+        margin-bottom: 24px;
+    }
+
+    .security-features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+
+    .feature-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 16px;
+        background: var(--bg-secondary);
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+        transition: all 0.3s ease;
+    }
+
+    .feature-item.active {
+        border-color: #22c55e;
+        background: rgba(34, 197, 94, 0.1);
+    }
+
+    .feature-icon {
+        font-size: 24px;
+    }
+
+    .feature-info h4 {
+        margin: 0;
+        font-size: 0.95rem;
+    }
+
+    .feature-info p {
+        margin: 4px 0 0 0;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+
+    /* Form Styles */
+    .section-title {
+        margin: 24px 0 16px 0;
+        font-size: 1.1rem;
+        color: var(--primary);
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 8px;
+    }
+
+    .section-title:first-of-type {
+        margin-top: 0;
     }
 
     .form-row {
@@ -263,12 +403,84 @@
         justify-content: flex-end;
     }
 
+    /* Toggle Switch */
+    .advanced-options {
+        margin-top: 16px;
+    }
+
+    .checkbox-group {
+        margin-bottom: 0;
+    }
+
+    .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        cursor: pointer;
+        padding: 12px;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+    }
+
+    .toggle-label input {
+        display: none;
+    }
+
+    .toggle-switch {
+        width: 48px;
+        height: 24px;
+        background: var(--bg-tertiary);
+        border-radius: 12px;
+        position: relative;
+        transition: all 0.3s ease;
+    }
+
+    .toggle-switch::after {
+        content: '';
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        background: white;
+        border-radius: 50%;
+        top: 2px;
+        left: 2px;
+        transition: all 0.3s ease;
+    }
+
+    .toggle-label input:checked+.toggle-switch {
+        background: #22c55e;
+    }
+
+    .toggle-label input:checked+.toggle-switch::after {
+        left: 26px;
+    }
+
+    .toggle-text {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .toggle-text strong {
+        font-size: 0.95rem;
+    }
+
+    .toggle-text small {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-top: 2px;
+    }
+
+    /* Help sections */
     .help-card {
         margin-top: 24px;
     }
 
     .help-section {
         margin-bottom: 20px;
+        padding: 16px;
+        background: var(--bg-secondary);
+        border-radius: 8px;
     }
 
     .help-section:last-child {
@@ -276,11 +488,12 @@
     }
 
     .help-section h4 {
-        margin: 0 0 8px 0;
+        margin: 0 0 12px 0;
         color: var(--text-primary);
     }
 
-    .help-section ol {
+    .help-section ol,
+    .help-section ul {
         margin: 0;
         padding-right: 20px;
     }
@@ -289,10 +502,13 @@
         margin-bottom: 8px;
     }
 
+    .help-section.success {
+        background: rgba(34, 197, 94, 0.1);
+        border-right: 4px solid #22c55e;
+    }
+
     .help-section.warning {
         background: rgba(234, 179, 8, 0.1);
-        padding: 16px;
-        border-radius: 8px;
         border-right: 4px solid #eab308;
     }
 
@@ -314,6 +530,31 @@
 
     .test-error {
         color: #ef4444;
+    }
+
+    .loading-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 24px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .tunnel-status-card {
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .status-actions {
+            width: 100%;
+            justify-content: center;
+        }
+
+        .security-features {
+            grid-template-columns: 1fr;
+        }
     }
 </style>
 
@@ -347,8 +588,10 @@
                 document.getElementById('remote_ip').value = currentConfig.remote_ip || '';
                 document.getElementById('remote_port').value = currentConfig.remote_port || 2083;
                 document.getElementById('local_port').value = currentConfig.local_port || 443;
-                document.getElementById('protocol').value = currentConfig.protocol || 'relay+tls';
+                document.getElementById('protocol').value = currentConfig.protocol || 'h2';
                 document.getElementById('sni').value = currentConfig.sni || 'www.google.com';
+                document.getElementById('mux').checked = currentConfig.mux !== false;
+                document.getElementById('padding').checked = currentConfig.padding !== false;
             }
         } catch (error) {
             console.error('Error loading tunnel config:', error);
@@ -364,8 +607,8 @@
 
         if (status.running) {
             icon.className = 'status-icon running';
-            title.textContent = 'تانل فعال است';
-            desc.textContent = `متصل به ${currentConfig.remote_ip || 'سرور فرانسه'}`;
+            title.textContent = '🔒 تانل امن فعال است';
+            desc.textContent = `متصل به ${currentConfig.remote_ip || 'سرور فرانسه'} با ${currentConfig.protocol?.toUpperCase() || 'H2'}`;
             startBtn.disabled = true;
             stopBtn.disabled = false;
         } else if (status.installed) {
@@ -391,7 +634,10 @@
             remote_port: parseInt(document.getElementById('remote_port').value),
             local_port: parseInt(document.getElementById('local_port').value),
             protocol: document.getElementById('protocol').value,
-            sni: document.getElementById('sni').value
+            sni: document.getElementById('sni').value,
+            obfuscation: "tls",
+            mux: document.getElementById('mux').checked,
+            padding: document.getElementById('padding').checked
         };
 
         try {
@@ -407,7 +653,7 @@
             const data = await response.json();
 
             if (response.ok) {
-                showNotification('تنظیمات با موفقیت ذخیره شد', 'success');
+                showNotification('تنظیمات ضد شناسایی با موفقیت ذخیره شد', 'success');
                 currentConfig = config;
                 loadTunnelStatus();
             } else {
@@ -432,7 +678,7 @@
             const data = await response.json();
 
             if (response.ok) {
-                showNotification('تانل با موفقیت شروع شد', 'success');
+                showNotification('تانل امن با قابلیت‌های ضد شناسایی شروع شد 🔒', 'success');
             } else {
                 showNotification(data.detail || 'خطا در شروع تانل', 'error');
             }
@@ -466,6 +712,34 @@
         }
 
         loadTunnelStatus();
+    }
+
+    async function applyStealthConfig() {
+        const btn = document.getElementById('stealth-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="loading"></span> در حال اعمال...';
+
+        try {
+            const response = await fetch('/api/tunnel/apply-stealth', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showNotification('تنظیمات ضد شناسایی به OCServ اعمال شد 🛡️', 'success');
+            } else {
+                showNotification(data.detail || 'خطا در اعمال تنظیمات', 'error');
+            }
+        } catch (error) {
+            showNotification('خطا در ارتباط با سرور', 'error');
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg> اعمال Stealth`;
     }
 
     async function testConnection() {
@@ -507,10 +781,11 @@
             }
 
             if (data.latency_ms) {
+                let latencyClass = data.latency_ms < 100 ? 'test-success' : (data.latency_ms < 200 ? '' : 'test-error');
                 resultHtml += `
                 <div class="test-result-item">
                     <span>تأخیر (Ping):</span>
-                    <span>${data.latency_ms.toFixed(1)} ms</span>
+                    <span class="${latencyClass}">${data.latency_ms.toFixed(1)} ms</span>
                 </div>
             `;
             }
@@ -542,7 +817,6 @@
     }
 
     function showNotification(message, type = 'info') {
-        // Use existing notification system from base template
         if (typeof window.showToast === 'function') {
             window.showToast(message, type);
         } else {
