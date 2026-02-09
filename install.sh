@@ -282,10 +282,37 @@ setup_ssl() {
         return
     fi
     
+    # Check if port 80 is available
+    PORT_80_BUSY=false
+    if ss -tuln 2>/dev/null | grep -q ":80 " || netstat -tuln 2>/dev/null | grep -q ":80 "; then
+        PORT_80_BUSY=true
+        log_warning "Port 80 is in use by another service"
+    fi
+    
+    # Check if domain resolves to this server
+    DOMAIN_IP=$(dig +short $DOMAIN 2>/dev/null | head -1)
+    if [[ "$DOMAIN_IP" != "$PUBLIC_IP" ]]; then
+        log_warning "Domain $DOMAIN does not point to this server ($PUBLIC_IP)"
+        log_warning "DNS record points to: $DOMAIN_IP"
+    fi
+    
     # Ask user about SSL type
     echo ""
-    log_warning "Port 80 required for Let's Encrypt. If busy, use self-signed."
-    read -p "$(echo -e ${YELLOW}Use self-signed certificate? \[y/N\]: ${NC})" USE_SELFSIGNED
+    if [[ "$PORT_80_BUSY" == "true" ]]; then
+        log_warning "Port 80 is busy. Let's Encrypt requires port 80 to be free."
+        read -p "$(echo -e ${YELLOW}Use self-signed certificate? [Y/n]: ${NC})" USE_SELFSIGNED
+        USE_SELFSIGNED=${USE_SELFSIGNED:-y}
+    else
+        log_info "Port 80 is available for Let's Encrypt"
+        read -p "$(echo -e ${YELLOW}Try Let's Encrypt certificate? [Y/n]: ${NC})" TRY_LETSENCRYPT
+        TRY_LETSENCRYPT=${TRY_LETSENCRYPT:-y}
+        
+        if [[ "$TRY_LETSENCRYPT" =~ ^[Nn]$ ]]; then
+            USE_SELFSIGNED="y"
+        else
+            USE_SELFSIGNED="n"
+        fi
+    fi
     
     if [[ "$USE_SELFSIGNED" =~ ^[Yy]$ ]]; then
         log_info "Creating self-signed certificate..."
@@ -305,30 +332,35 @@ setup_ssl() {
         if command -v snap &> /dev/null; then
             snap install core 2>/dev/null || true
             snap install --classic certbot 2>/dev/null || true
+            ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
             CERTBOT_CMD="/snap/bin/certbot"
         else
+            # Install certbot via apt if snap not available
+            apt-get install -y -qq certbot > /dev/null 2>&1 || true
             CERTBOT_CMD="certbot"
         fi
         
         # Try to get certificate
-        $CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
+        if $CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
             --email admin@$DOMAIN \
             -d $DOMAIN \
-            --preferred-challenges http 2>/dev/null
-        
-        if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
-            ln -sf /etc/letsencrypt/live/$DOMAIN/fullchain.pem /etc/ocserv/ssl/server-cert.pem
-            ln -sf /etc/letsencrypt/live/$DOMAIN/privkey.pem /etc/ocserv/ssl/server-key.pem
-            log_success "Let's Encrypt certificate obtained"
+            --preferred-challenges http 2>&1; then
             
-            # Setup auto-renewal
-            cat > /etc/cron.d/certbot-ocserv << 'CRONEOF'
+            if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+                ln -sf /etc/letsencrypt/live/$DOMAIN/fullchain.pem /etc/ocserv/ssl/server-cert.pem
+                ln -sf /etc/letsencrypt/live/$DOMAIN/privkey.pem /etc/ocserv/ssl/server-key.pem
+                log_success "Let's Encrypt certificate obtained"
+                
+                # Setup auto-renewal
+                cat > /etc/cron.d/certbot-ocserv << 'CRONEOF'
 0 0 1 * * root /snap/bin/certbot renew --quiet && systemctl reload ocserv
 CRONEOF
-        else
-            log_warning "Let's Encrypt failed. Creating self-signed certificate..."
-            create_self_signed_cert
+                return
+            fi
         fi
+        
+        log_warning "Let's Encrypt failed. Creating self-signed certificate..."
+        create_self_signed_cert
     fi
 }
 
