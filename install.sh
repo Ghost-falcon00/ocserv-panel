@@ -650,115 +650,43 @@ optimize_vps_network() {
     # TCP BBR + Advanced Network Optimization
     # ═══════════════════════════════════════════════════════════
     
-    cat > /etc/sysctl.d/99-ocserv-optimized.conf << 'EOF'
-# ╔═══════════════════════════════════════════════════════════╗
-# ║      OCServ Panel - VPS Network Optimization              ║
-# ║      بهینه‌سازی شبکه برای حداکثر سرعت و پایداری            ║
-# ╚═══════════════════════════════════════════════════════════╝
-
-# ═══════════════════════════════════════════════════════════
-# IP Forwarding - ضروری برای VPN
-# ═══════════════════════════════════════════════════════════
-net.ipv4.ip_forward = 1
-net.ipv6.conf.all.forwarding = 1
-
-# ═══════════════════════════════════════════════════════════
-# TCP BBR Congestion Control - بهترین الگوریتم برای سرعت
-# ═══════════════════════════════════════════════════════════
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-
-# ═══════════════════════════════════════════════════════════
-# TCP Buffer Optimization - افزایش سرعت انتقال
-# ═══════════════════════════════════════════════════════════
-# افزایش بافر دریافت
-net.core.rmem_default = 1048576
-net.core.rmem_max = 16777216
-net.ipv4.tcp_rmem = 4096 1048576 16777216
-
-# افزایش بافر ارسال
-net.core.wmem_default = 1048576
-net.core.wmem_max = 16777216
-net.ipv4.tcp_wmem = 4096 1048576 16777216
-
-# بافر عمومی
-net.core.optmem_max = 65535
-net.core.netdev_max_backlog = 65536
-
-# ═══════════════════════════════════════════════════════════
-# TCP Performance Tuning - بهینه‌سازی عملکرد TCP
-# ═══════════════════════════════════════════════════════════
-# فعال کردن TCP Fast Open - اتصال سریع‌تر
-net.ipv4.tcp_fastopen = 3
-
-# Window Scaling - پنجره بزرگ‌تر = سرعت بیشتر
-net.ipv4.tcp_window_scaling = 1
-
-# افزایش محدودیت اتصالات
-net.ipv4.tcp_max_syn_backlog = 65536
-net.core.somaxconn = 65535
-
-# کاهش زمان انتظار اتصالات
-net.ipv4.tcp_fin_timeout = 15
-net.ipv4.tcp_tw_reuse = 1
-
-# Keepalive بهینه
-net.ipv4.tcp_keepalive_time = 600
-net.ipv4.tcp_keepalive_intvl = 60
-net.ipv4.tcp_keepalive_probes = 5
-
-# غیرفعال کردن Timestamps (کاهش فیلترینگ)
-net.ipv4.tcp_timestamps = 0
-
-# غیرفعال کردن SACK (برخی فیلترها ازش استفاده میکنن)
-net.ipv4.tcp_sack = 0
-
-# MTU Probing - کشف بهترین MTU
-net.ipv4.tcp_mtu_probing = 1
-
-# ═══════════════════════════════════════════════════════════
-# Anti-Filtering Settings - ضد فیلترینگ
-# ═══════════════════════════════════════════════════════════
-# غیرفعال کردن ECN (فیلترها ازش استفاده میکنن)
-net.ipv4.tcp_ecn = 0
-
-# افزایش تنوع پورت منبع
-net.ipv4.ip_local_port_range = 1024 65535
-
-# ═══════════════════════════════════════════════════════════
-# Security Hardening - امنیت
-# ═══════════════════════════════════════════════════════════
-# محافظت در برابر SYN Flood
-net.ipv4.tcp_syncookies = 1
-net.ipv4.tcp_max_orphans = 65536
-
-# جلوگیری از IP Spoofing
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.default.rp_filter = 1
-
-# غیرفعال کردن ICMP Redirect (امنیت بالاتر)
-net.ipv4.conf.all.accept_redirects = 0
-net.ipv4.conf.default.accept_redirects = 0
-net.ipv4.conf.all.send_redirects = 0
-net.ipv4.conf.default.send_redirects = 0
-
-# ═══════════════════════════════════════════════════════════
-# Memory Optimization - بهینه‌سازی حافظه
-# ═══════════════════════════════════════════════════════════
-net.ipv4.tcp_mem = 786432 1048576 1572864
-net.ipv4.udp_mem = 786432 1048576 1572864
-
-# ═══════════════════════════════════════════════════════════
-# Connection Tracking - برای NAT بهتر
-# ═══════════════════════════════════════════════════════════
-net.netfilter.nf_conntrack_max = 1048576
-net.nf_conntrack_max = 1048576
-
-# VFS Cache
-vm.swappiness = 10
-vm.dirty_ratio = 60
-vm.dirty_background_ratio = 5
-EOF
+    # Create optimized systemctl config
+    echo "# OCServ Panel - VPS Network Optimization" > /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv6.conf.all.forwarding = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.core.default_qdisc = fq" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_congestion_control = bbr" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.core.rmem_default = 1048576" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.core.rmem_max = 16777216" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_rmem = 4096 1048576 16777216" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.core.wmem_default = 1048576" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.core.wmem_max = 16777216" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_wmem = 4096 1048576 16777216" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_fin_timeout = 15" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_tw_reuse = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_keepalive_time = 600" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_keepalive_intvl = 60" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_keepalive_probes = 5" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_timestamps = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_sack = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_mtu_probing = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_ecn = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.ip_local_port_range = 1024 65535" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_syncookies = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_max_orphans = 65536" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.conf.all.rp_filter = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.conf.default.rp_filter = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.conf.all.accept_redirects = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.conf.default.accept_redirects = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.conf.all.send_redirects = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.conf.default.send_redirects = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.tcp_mem = 786432 1048576 1572864" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.ipv4.udp_mem = 786432 1048576 1572864" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.netfilter.nf_conntrack_max = 1048576" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "net.nf_conntrack_max = 1048576" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "vm.swappiness = 10" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "vm.dirty_ratio = 60" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    echo "vm.dirty_background_ratio = 5" >> /etc/sysctl.d/99-ocserv-optimized.conf
 
     # اعمال تنظیمات
     sysctl -p /etc/sysctl.d/99-ocserv-optimized.conf > /dev/null 2>&1 || true
