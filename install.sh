@@ -127,15 +127,15 @@ select_server_mode() {
     case $mode_choice in
         1)
             SERVER_MODE="iran"
-            log_info "حالت: سرور ایران (با تانل)"
+            log_info "Mode: Iran Server [with Tunnel]"
             ;;
         2)
             SERVER_MODE="france"
-            log_info "حالت: سرور خارج (بدون تانل)"
+            log_info "Mode: Foreign Server [NO Tunnel]"
             ;;
         *)
             SERVER_MODE="iran"
-            log_info "حالت پیش‌فرض: سرور ایران"
+            log_info "Default: Iran Server"
             ;;
     esac
 }
@@ -694,8 +694,8 @@ optimize_vps_network() {
     log_success "VPS network optimized with BBR + advanced settings"
 }
 
-setup_firewall() {
-    log_info "Configuring firewall (safe mode - won't break existing rules)..."
+function setup_firewall() {
+    log_info "Configuring firewall [safe mode - will not break existing rules]..."
     
     # Get default interface
     DEFAULT_IF=$(ip route | grep default | awk '{print $5}' | head -1)
@@ -752,13 +752,13 @@ setup_firewall() {
         ufw allow ${OCSERV_PORT}/udp > /dev/null 2>&1 || true
         ufw allow ${PANEL_PORT}/tcp > /dev/null 2>&1 || true
         
-        log_info "UFW rules added (SSH: allowed, VPN: ${OCSERV_PORT}, Panel: ${PANEL_PORT})"
+        log_info "UFW rules added [SSH: allowed, VPN: ${OCSERV_PORT}, Panel: ${PANEL_PORT}]"
     fi
     
-    log_success "Firewall configured (safe mode - existing rules preserved)"
+    log_success "Firewall configured [safe mode - existing rules preserved]"
 }
 
-start_services() {
+function start_services() {
     log_info "Starting services..."
     
     systemctl restart ocserv
