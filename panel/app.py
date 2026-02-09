@@ -26,7 +26,8 @@ from api import (
     logs_router,
     dashboard_router,
     blocking_router,
-    routes_router
+    routes_router,
+    tunnel_router
 )
 from services.logging_service import setup_logging
 
@@ -149,6 +150,7 @@ app.include_router(logs_router)
 app.include_router(dashboard_router)
 app.include_router(blocking_router)
 app.include_router(routes_router)
+app.include_router(tunnel_router)
 
 
 # ========== Frontend Routes ==========
@@ -193,6 +195,12 @@ async def logs_page(request: Request):
 async def system_logs_page(request: Request):
     """صفحه لاگ سیستم"""
     return templates.TemplateResponse("system_logs.html", {"request": request})
+
+
+@app.get("/tunnel", response_class=HTMLResponse)
+async def tunnel_page(request: Request):
+    """صفحه مدیریت تانل"""
+    return templates.TemplateResponse("tunnel.html", {"request": request})
 
 
 # ========== Health Check ==========

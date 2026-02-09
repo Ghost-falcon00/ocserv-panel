@@ -1,0 +1,553 @@
+{% extends "base.html" %}
+
+{% block title %}تانل - OCServ Panel{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>مدیریت تانل</h1>
+    <p class="page-description">اتصال امن و ضد فیلتر به سرور خارجی</p>
+</div>
+
+<!-- Status Card -->
+<div class="tunnel-status-card" id="tunnel-status-card">
+    <div class="status-indicator">
+        <div class="status-icon" id="status-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+            </svg>
+        </div>
+        <div class="status-info">
+            <h3 id="status-title">در حال بررسی...</h3>
+            <p id="status-description">لطفاً صبر کنید</p>
+        </div>
+    </div>
+    <div class="status-actions">
+        <button class="btn btn-success" id="start-btn" onclick="startTunnel()" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            شروع
+        </button>
+        <button class="btn btn-danger" id="stop-btn" onclick="stopTunnel()" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+            توقف
+        </button>
+    </div>
+</div>
+
+<!-- Configuration Card -->
+<div class="card">
+    <div class="card-header">
+        <h2>تنظیمات سرور فرانسه</h2>
+    </div>
+    <div class="card-body">
+        <form id="tunnel-config-form" onsubmit="saveTunnelConfig(event)">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="remote_ip">آی‌پی سرور فرانسه</label>
+                    <input type="text" id="remote_ip" name="remote_ip" placeholder="مثال: 45.13.119.218" required>
+                    <small>آی‌پی سرور خارجی که OCServ روی آن نصب است</small>
+                </div>
+                <div class="form-group">
+                    <label for="remote_port">پورت OCServ</label>
+                    <input type="number" id="remote_port" name="remote_port" value="2083" min="1" max="65535">
+                    <small>پورت سرویس VPN (پیش‌فرض: 2083)</small>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="local_port">پورت ورودی (ایران)</label>
+                    <input type="number" id="local_port" name="local_port" value="443" min="1" max="65535">
+                    <small>پورتی که کلاینت‌ها بهش وصل میشن (443 بهترین انتخابه)</small>
+                </div>
+                <div class="form-group">
+                    <label for="protocol">پروتکل تانل</label>
+                    <select id="protocol" name="protocol">
+                        <option value="relay+tls">TLS (پیشنهادی - سریع و امن)</option>
+                        <option value="relay+wss">WebSocket Secure</option>
+                        <option value="relay">بدون رمزنگاری اضافه</option>
+                    </select>
+                    <small>TLS بهترین انتخاب برای عبور از فیلترینگ</small>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="sni">SNI (Server Name Indication)</label>
+                    <input type="text" id="sni" name="sni" value="www.google.com" placeholder="www.google.com">
+                    <small>سایتی که ترافیک شما شبیه اون به نظر میرسه</small>
+                </div>
+                <div class="form-group">
+                    <label>&nbsp;</label>
+                    <button type="button" class="btn btn-secondary" onclick="testConnection()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                            <polyline points="22 4 12 14.01 9 11.01" />
+                        </svg>
+                        تست اتصال
+                    </button>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    ذخیره تنظیمات
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Test Result Modal -->
+<div class="modal" id="test-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>نتیجه تست اتصال</h3>
+            <button class="modal-close" onclick="closeModal('test-modal')">&times;</button>
+        </div>
+        <div class="modal-body" id="test-result">
+            <!-- Results will be inserted here -->
+        </div>
+    </div>
+</div>
+
+<!-- Help Section -->
+<div class="card help-card">
+    <div class="card-header">
+        <h2>راهنما</h2>
+    </div>
+    <div class="card-body">
+        <div class="help-section">
+            <h4>🔧 نحوه تنظیم:</h4>
+            <ol>
+                <li>IP سرور فرانسه رو وارد کن (سروری که OCServ روش نصبه)</li>
+                <li>پورت OCServ رو بزن (معمولاً 2083 یا 443)</li>
+                <li>دکمه "تست اتصال" رو بزن تا مطمئن شی سرور در دسترسه</li>
+                <li>تنظیمات رو ذخیره کن و "شروع" رو بزن</li>
+            </ol>
+        </div>
+        <div class="help-section">
+            <h4>📱 اتصال کلاینت‌ها:</h4>
+            <p>بعد از فعال‌سازی تانل، کلاینت‌ها باید به <strong>IP سرور ایران:443</strong> وصل شن (نه فرانسه!)</p>
+        </div>
+        <div class="help-section warning">
+            <h4>⚠️ نکته مهم:</h4>
+            <p>برای کار کردن تانل، باید روی سرور فرانسه هم اسکریپت مخصوص رو اجرا کنی.</p>
+        </div>
+    </div>
+</div>
+
+<style>
+    .tunnel-status-card {
+        background: linear-gradient(135deg, var(--card-bg) 0%, rgba(99, 102, 241, 0.1) 100%);
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border: 1px solid var(--border-color);
+    }
+
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+
+    .status-icon {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg-secondary);
+    }
+
+    .status-icon svg {
+        width: 32px;
+        height: 32px;
+    }
+
+    .status-icon.running {
+        background: rgba(34, 197, 94, 0.2);
+        animation: pulse 2s infinite;
+    }
+
+    .status-icon.running svg {
+        stroke: #22c55e;
+    }
+
+    .status-icon.stopped {
+        background: rgba(239, 68, 68, 0.2);
+    }
+
+    .status-icon.stopped svg {
+        stroke: #ef4444;
+    }
+
+    .status-icon.loading {
+        background: rgba(234, 179, 8, 0.2);
+    }
+
+    .status-icon.loading svg {
+        stroke: #eab308;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes pulse {
+
+        0%,
+        100% {
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        50% {
+            transform: scale(1.05);
+            opacity: 0.8;
+        }
+    }
+
+    @keyframes spin {
+        from {
+            transform: rotate(0deg);
+        }
+
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .status-info h3 {
+        margin: 0 0 4px 0;
+        font-size: 1.5rem;
+    }
+
+    .status-info p {
+        margin: 0;
+        color: var(--text-secondary);
+    }
+
+    .status-actions {
+        display: flex;
+        gap: 12px;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+
+    .form-group small {
+        display: block;
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        margin-top: 4px;
+    }
+
+    .form-actions {
+        margin-top: 24px;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .help-card {
+        margin-top: 24px;
+    }
+
+    .help-section {
+        margin-bottom: 20px;
+    }
+
+    .help-section:last-child {
+        margin-bottom: 0;
+    }
+
+    .help-section h4 {
+        margin: 0 0 8px 0;
+        color: var(--text-primary);
+    }
+
+    .help-section ol {
+        margin: 0;
+        padding-right: 20px;
+    }
+
+    .help-section li {
+        margin-bottom: 8px;
+    }
+
+    .help-section.warning {
+        background: rgba(234, 179, 8, 0.1);
+        padding: 16px;
+        border-radius: 8px;
+        border-right: 4px solid #eab308;
+    }
+
+    /* Test result styles */
+    .test-result-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .test-result-item:last-child {
+        border-bottom: none;
+    }
+
+    .test-success {
+        color: #22c55e;
+    }
+
+    .test-error {
+        color: #ef4444;
+    }
+</style>
+
+<script>
+    let currentConfig = {};
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadTunnelStatus();
+        loadTunnelConfig();
+    });
+
+    async function loadTunnelStatus() {
+        try {
+            const response = await fetch('/api/tunnel/status', {
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+            const data = await response.json();
+            updateStatusUI(data);
+        } catch (error) {
+            console.error('Error loading tunnel status:', error);
+        }
+    }
+
+    async function loadTunnelConfig() {
+        try {
+            const response = await fetch('/api/tunnel/config', {
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+            if (response.ok) {
+                currentConfig = await response.json();
+                document.getElementById('remote_ip').value = currentConfig.remote_ip || '';
+                document.getElementById('remote_port').value = currentConfig.remote_port || 2083;
+                document.getElementById('local_port').value = currentConfig.local_port || 443;
+                document.getElementById('protocol').value = currentConfig.protocol || 'relay+tls';
+                document.getElementById('sni').value = currentConfig.sni || 'www.google.com';
+            }
+        } catch (error) {
+            console.error('Error loading tunnel config:', error);
+        }
+    }
+
+    function updateStatusUI(status) {
+        const icon = document.getElementById('status-icon');
+        const title = document.getElementById('status-title');
+        const desc = document.getElementById('status-description');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+
+        if (status.running) {
+            icon.className = 'status-icon running';
+            title.textContent = 'تانل فعال است';
+            desc.textContent = `متصل به ${currentConfig.remote_ip || 'سرور فرانسه'}`;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+        } else if (status.installed) {
+            icon.className = 'status-icon stopped';
+            title.textContent = 'تانل غیرفعال';
+            desc.textContent = 'برای شروع، دکمه "شروع" را بزنید';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        } else {
+            icon.className = 'status-icon stopped';
+            title.textContent = 'Gost نصب نشده';
+            desc.textContent = 'تنظیمات را ذخیره کنید، Gost خودکار نصب می‌شود';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        }
+    }
+
+    async function saveTunnelConfig(event) {
+        event.preventDefault();
+
+        const config = {
+            remote_ip: document.getElementById('remote_ip').value,
+            remote_port: parseInt(document.getElementById('remote_port').value),
+            local_port: parseInt(document.getElementById('local_port').value),
+            protocol: document.getElementById('protocol').value,
+            sni: document.getElementById('sni').value
+        };
+
+        try {
+            const response = await fetch('/api/tunnel/config', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${getToken()}`
+                },
+                body: JSON.stringify(config)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showNotification('تنظیمات با موفقیت ذخیره شد', 'success');
+                currentConfig = config;
+                loadTunnelStatus();
+            } else {
+                showNotification(data.detail || 'خطا در ذخیره تنظیمات', 'error');
+            }
+        } catch (error) {
+            showNotification('خطا در ارتباط با سرور', 'error');
+        }
+    }
+
+    async function startTunnel() {
+        const startBtn = document.getElementById('start-btn');
+        startBtn.disabled = true;
+        startBtn.innerHTML = '<span class="loading"></span> در حال شروع...';
+
+        try {
+            const response = await fetch('/api/tunnel/start', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showNotification('تانل با موفقیت شروع شد', 'success');
+            } else {
+                showNotification(data.detail || 'خطا در شروع تانل', 'error');
+            }
+        } catch (error) {
+            showNotification('خطا در ارتباط با سرور', 'error');
+        }
+
+        loadTunnelStatus();
+    }
+
+    async function stopTunnel() {
+        const stopBtn = document.getElementById('stop-btn');
+        stopBtn.disabled = true;
+        stopBtn.innerHTML = '<span class="loading"></span> در حال توقف...';
+
+        try {
+            const response = await fetch('/api/tunnel/stop', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showNotification('تانل متوقف شد', 'success');
+            } else {
+                showNotification(data.detail || 'خطا در توقف تانل', 'error');
+            }
+        } catch (error) {
+            showNotification('خطا در ارتباط با سرور', 'error');
+        }
+
+        loadTunnelStatus();
+    }
+
+    async function testConnection() {
+        const remoteIp = document.getElementById('remote_ip').value;
+        const remotePort = document.getElementById('remote_port').value;
+
+        if (!remoteIp) {
+            showNotification('لطفاً ابتدا IP سرور فرانسه را وارد کنید', 'error');
+            return;
+        }
+
+        document.getElementById('test-result').innerHTML = '<div class="loading-container"><span class="loading"></span> در حال تست...</div>';
+        document.getElementById('test-modal').classList.add('active');
+
+        try {
+            const response = await fetch(`/api/tunnel/test?remote_ip=${remoteIp}&remote_port=${remotePort}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+
+            const data = await response.json();
+
+            let resultHtml = `
+            <div class="test-result-item">
+                <span>دسترسی به سرور:</span>
+                <span class="${data.reachable ? 'test-success' : 'test-error'}">
+                    ${data.reachable ? '✓ در دسترس' : '✗ غیرقابل دسترس'}
+                </span>
+            </div>
+        `;
+
+            if (data.http_code) {
+                resultHtml += `
+                <div class="test-result-item">
+                    <span>کد HTTP:</span>
+                    <span>${data.http_code}</span>
+                </div>
+            `;
+            }
+
+            if (data.latency_ms) {
+                resultHtml += `
+                <div class="test-result-item">
+                    <span>تأخیر (Ping):</span>
+                    <span>${data.latency_ms.toFixed(1)} ms</span>
+                </div>
+            `;
+            }
+
+            if (data.error) {
+                resultHtml += `
+                <div class="test-result-item">
+                    <span>خطا:</span>
+                    <span class="test-error">${data.error}</span>
+                </div>
+            `;
+            }
+
+            document.getElementById('test-result').innerHTML = resultHtml;
+
+        } catch (error) {
+            document.getElementById('test-result').innerHTML = `
+            <div class="test-error">خطا در اجرای تست: ${error.message}</div>
+        `;
+        }
+    }
+
+    function closeModal(modalId) {
+        document.getElementById(modalId).classList.remove('active');
+    }
+
+    function getToken() {
+        return localStorage.getItem('token') || '';
+    }
+
+    function showNotification(message, type = 'info') {
+        // Use existing notification system from base template
+        if (typeof window.showToast === 'function') {
+            window.showToast(message, type);
+        } else {
+            alert(message);
+        }
+    }
+</script>
+{% endblock %}

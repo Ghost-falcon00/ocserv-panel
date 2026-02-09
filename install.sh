@@ -105,6 +105,78 @@ generate_random_string() {
     cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w ${1:-16} | head -n 1
 }
 
+# Server mode selection
+SERVER_MODE="iran"  # Default to Iran mode
+
+select_server_mode() {
+    echo ""
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}                 انتخاب نوع سرور                           ${NC}"
+    echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}این سرور کجا قرار داره؟${NC}"
+    echo ""
+    echo "  1) ${GREEN}سرور ایران${NC} (Entry Point - کاربران بهش وصل میشن)"
+    echo "     پنل + تانل نصب میشه"
+    echo ""
+    echo "  2) ${BLUE}سرور خارج (فرانسه و...)${NC} (Exit Point - VPN اصلی)"
+    echo "     فقط OCServ نصب میشه"
+    echo ""
+    read -p "انتخاب [1/2]: " mode_choice
+    
+    case $mode_choice in
+        1)
+            SERVER_MODE="iran"
+            log_info "حالت: سرور ایران (با تانل)"
+            ;;
+        2)
+            SERVER_MODE="france"
+            log_info "حالت: سرور خارج (بدون تانل)"
+            ;;
+        *)
+            SERVER_MODE="iran"
+            log_info "حالت پیش‌فرض: سرور ایران"
+            ;;
+    esac
+}
+
+# Install Gost for tunnel
+install_gost() {
+    log_info "Installing Gost tunnel..."
+    
+    GOST_VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | grep -oP '"tag_name": "v\K[^"]+' || echo "3.0.0")
+    
+    wget -q "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-amd64-${GOST_VERSION}.gz" -O /tmp/gost.gz || {
+        log_warning "Failed to download Gost, will be installed later from panel"
+        return
+    }
+    
+    gunzip -f /tmp/gost.gz
+    mv /tmp/gost /usr/local/bin/gost
+    chmod +x /usr/local/bin/gost
+    mkdir -p /etc/gost
+    
+    # Create systemd service
+    cat > /etc/systemd/system/gost.service << 'EOF'
+[Unit]
+Description=Gost Tunnel Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gost -C /etc/gost/config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    systemctl daemon-reload
+    
+    log_success "Gost installed"
+}
+
 get_user_input() {
     echo ""
     echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
@@ -795,6 +867,7 @@ main() {
     check_root
     check_os
     get_public_ip
+    select_server_mode
     get_user_input
     
     echo ""
@@ -809,9 +882,33 @@ main() {
     create_systemd_service
     optimize_vps_network
     setup_firewall
+    
+    # Install Gost for Iran server mode
+    if [[ "$SERVER_MODE" == "iran" ]]; then
+        install_gost
+    fi
+    
     start_services
     save_install_info
     print_info
+    
+    # Print tunnel instructions for Iran mode
+    if [[ "$SERVER_MODE" == "iran" ]]; then
+        echo ""
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${CYAN}                    🔗 تنظیم تانل                            ${NC}"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        echo -e "  ${YELLOW}مراحل تنظیم تانل:${NC}"
+        echo -e "  1. وارد پنل شو و به بخش ${GREEN}تانل${NC} برو"
+        echo -e "  2. IP سرور خارج (فرانسه) رو وارد کن"
+        echo -e "  3. تانل رو روشن کن"
+        echo ""
+        echo -e "  ${YELLOW}روی سرور خارج این دستور رو بزن:${NC}"
+        echo -e "  ${GREEN}bash <(curl -sL ${GITHUB_RAW}/france-setup.sh)${NC}"
+        echo ""
+        echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+    fi
 }
 
 # Uninstall function
