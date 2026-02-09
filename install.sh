@@ -266,6 +266,21 @@ install_dependencies() {
     log_success "Dependencies installed"
 }
 
+function create_self_signed_cert() {
+    log_info "Generating self-signed certificate (valid for 10 years)..."
+    
+    openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
+        -subj "/C=IR/ST=Tehran/L=Tehran/O=OCServ/CN=$DOMAIN" \
+        -keyout /etc/ocserv/ssl/server-key.pem \
+        -out /etc/ocserv/ssl/server-cert.pem \
+        > /dev/null 2>&1
+    
+    chmod 600 /etc/ocserv/ssl/*.pem
+    
+    log_success "Self-signed certificate created"
+    log_warning "Note: Clients will see a certificate warning (normal for self-signed)"
+}
+
 setup_ssl() {
     log_info "Setting up SSL certificate for $DOMAIN..."
     
@@ -362,20 +377,7 @@ setup_ssl() {
     fi
 }
 
-create_self_signed_cert() {
-    log_info "Generating self-signed certificate (valid for 10 years)..."
-    
-    openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
-        -subj "/C=IR/ST=Tehran/L=Tehran/O=OCServ/CN=$DOMAIN" \
-        -keyout /etc/ocserv/ssl/server-key.pem \
-        -out /etc/ocserv/ssl/server-cert.pem \
-        > /dev/null 2>&1
-    
-    chmod 600 /etc/ocserv/ssl/*.pem
-    
-    log_success "Self-signed certificate created"
-    log_warning "Note: Clients will see a certificate warning (normal for self-signed)"
-}
+
 
 configure_ocserv() {
     log_info "Configuring OCServ with Iran-optimized settings..."
