@@ -352,9 +352,7 @@ setup_ssl() {
                 log_success "Let's Encrypt certificate obtained"
                 
                 # Setup auto-renewal
-                cat > /etc/cron.d/certbot-ocserv << 'CRONEOF'
-0 0 1 * * root /snap/bin/certbot renew --quiet && systemctl reload ocserv
-CRONEOF
+                echo "0 0 1 * * root /snap/bin/certbot renew --quiet && systemctl reload ocserv" > /etc/cron.d/certbot-ocserv
                 return
             fi
         fi
