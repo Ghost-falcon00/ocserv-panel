@@ -21,6 +21,7 @@ NC='\033[0m'
 
 # Variables
 API_PORT=6443
+GOST_PORT=2083
 OCSERV_PORT=443
 VPN_USER=""
 VPN_PASS=""
@@ -404,6 +405,7 @@ configure_firewall() {
     # Flush existing OCServ rules (avoid duplicates)
     iptables -D INPUT -p tcp --dport $OCSERV_PORT -j ACCEPT 2>/dev/null || true
     iptables -D INPUT -p tcp --dport $API_PORT -j ACCEPT 2>/dev/null || true
+    iptables -D INPUT -p tcp --dport $GOST_PORT -j ACCEPT 2>/dev/null || true
     
     # Allow OCServ port
     iptables -I INPUT -p tcp --dport $OCSERV_PORT -j ACCEPT
@@ -412,6 +414,10 @@ configure_firewall() {
     # Allow Remote API port
     iptables -I INPUT -p tcp --dport $API_PORT -j ACCEPT
     success "  Opened port $API_PORT (Remote API)"
+    
+    # Allow Gost relay port
+    iptables -I INPUT -p tcp --dport $GOST_PORT -j ACCEPT
+    success "  Opened port $GOST_PORT (Gost Relay)"
     
     # NAT for VPN clients  
     iptables -t nat -A POSTROUTING -s 192.168.100.0/24 -o $DEFAULT_IF -j MASQUERADE
@@ -539,6 +545,124 @@ EOF
     fi
 }
 
+# ========== Gost Relay Server ==========
+
+install_gost_relay() {
+    info "Installing Gost relay server (for encrypted tunnel from Iran)..."
+    
+    # Check if already installed
+    if command -v gost &> /dev/null; then
+        CURRENT_VER=$(gost -V 2>&1 | head -1)
+        info "Gost already installed: $CURRENT_VER"
+    else
+        GOST_VERSION="3.2.6"
+        GOST_FILE="gost_${GOST_VERSION}_linux_amd64.tar.gz"
+        GOST_URL="https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}"
+        
+        GOST_DOWNLOADED=false
+        
+        for url in "$GOST_URL" "https://ghproxy.net/${GOST_URL}" "https://gh-proxy.com/${GOST_URL}"; do
+            src=$(echo "$url" | cut -d'/' -f3)
+            echo -ne "  ⏳ ${CYAN}${src}${NC} ... "
+            
+            if timeout 15 wget --timeout=10 --tries=1 -q "$url" -O /tmp/gost.tar.gz 2>/dev/null; then
+                SIZE=$(stat -c%s /tmp/gost.tar.gz 2>/dev/null || echo 0)
+                if [ "$SIZE" -gt 100000 ]; then
+                    echo -e "${GREEN}✓ (${SIZE} bytes)${NC}"
+                    GOST_DOWNLOADED=true
+                    break
+                else
+                    echo -e "${RED}✗ (invalid)${NC}"
+                    rm -f /tmp/gost.tar.gz
+                fi
+            else
+                echo -e "${RED}✗${NC}"
+                rm -f /tmp/gost.tar.gz 2>/dev/null
+            fi
+        done
+        
+        if [[ "$GOST_DOWNLOADED" == "false" ]]; then
+            warning "Could not download Gost. Tunnel relay will not work."
+            warning "Install manually: wget $GOST_URL && tar xzf ..."
+            return
+        fi
+        
+        tar -xzf /tmp/gost.tar.gz -C /tmp/
+        cp /tmp/gost /usr/local/bin/gost
+        chmod +x /usr/local/bin/gost
+        rm -f /tmp/gost.tar.gz
+        success "Gost $(gost -V 2>&1 | head -1) installed"
+    fi
+    
+    # Create Gost relay config — WSS relay server
+    # Iran's Gost connects here with relay+wss, then traffic is forwarded to local OCServ
+    mkdir -p /etc/gost
+    
+    cat > /etc/gost/config.json << EOF
+{
+  "Log": {
+    "Level": "warn"
+  },
+  "Services": [
+    {
+      "Name": "relay-server",
+      "Addr": ":${GOST_PORT}",
+      "Handler": {
+        "Type": "relay"
+      },
+      "Listener": {
+        "Type": "wss",
+        "TLS": {
+          "CertFile": "/etc/ocserv/ssl/server-cert.pem",
+          "KeyFile": "/etc/ocserv/ssl/server-key.pem"
+        },
+        "Metadata": {
+          "header": {
+            "Server": ["nginx/1.24.0"],
+            "X-Powered-By": ["PHP/8.2.12"]
+          },
+          "path": "/ws/api/v1"
+        }
+      }
+    }
+  ]
+}
+EOF
+    
+    # Create systemd service
+    cat > /etc/systemd/system/gost.service << 'EOF'
+[Unit]
+Description=Gost Relay Tunnel Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gost -C /etc/gost/config.json
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # Kill anything on the relay port
+    kill_port $GOST_PORT
+    
+    systemctl daemon-reload
+    systemctl enable gost > /dev/null 2>&1
+    systemctl restart gost
+    
+    sleep 2
+    
+    if systemctl is-active --quiet gost; then
+        success "Gost relay running on port $GOST_PORT (WSS+TLS)"
+    else
+        warning "Gost relay installed but failed to start"
+        journalctl -u gost -n 5 --no-pager 2>/dev/null
+    fi
+}
+
 # ========== Start OCServ ==========
 
 start_ocserv() {
@@ -583,7 +707,7 @@ print_summary() {
     echo -e "${CYAN}═══ وضعیت سرویس‌ها ═══${NC}"
     
     # Check all services
-    for svc in ocserv ocserv-remote-api; do
+    for svc in ocserv ocserv-remote-api gost; do
         if systemctl is-active --quiet $svc 2>/dev/null; then
             echo -e "  ${GREEN}●${NC} $svc: ${GREEN}running${NC}"
         else
@@ -594,7 +718,7 @@ print_summary() {
     # Check ports
     echo ""
     echo -e "${CYAN}═══ وضعیت پورت‌ها ═══${NC}"
-    for port in $OCSERV_PORT $API_PORT; do
+    for port in $OCSERV_PORT $API_PORT $GOST_PORT; do
         if lsof -ti:$port &>/dev/null; then
             echo -e "  ${GREEN}●${NC} Port $port: ${GREEN}listening${NC}"
         else
@@ -621,6 +745,7 @@ OCServ France Server Info
 =========================
 Server IP:      $SERVER_IP
 OCServ Port:    $OCSERV_PORT
+Gost Relay:     $GOST_PORT
 VPN User:       $VPN_USER
 API Port:       $API_PORT
 API Token:      $API_TOKEN
@@ -653,6 +778,7 @@ main() {
     
     # Phase 4: Services
     install_remote_api
+    install_gost_relay
     
     # Phase 5: Start
     start_ocserv

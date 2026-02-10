@@ -32,9 +32,9 @@ router = APIRouter(prefix="/api/tunnel", tags=["Tunnel"])
 class TunnelConfig(BaseModel):
     """تنظیمات تانل پیشرفته"""
     remote_ip: str
-    remote_port: int = 2083
+    remote_port: int = 443  # OCServ port on France
     local_port: int = 443
-    protocol: str = "h2"  # h2, wss, tls
+    protocol: str = "wss"  # wss (recommended), h2, tls
     sni: str = "www.google.com"
     obfuscation: str = "tls"
     mux: bool = True  # Multiplexing

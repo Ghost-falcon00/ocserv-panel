@@ -290,33 +290,42 @@ WantedBy=multi-user.target
     async def update_config(
         self,
         remote_ip: str,
-        remote_port: int = 2083,
+        remote_port: int = 443,
         local_port: int = 443,
-        protocol: str = "tcp",
+        protocol: str = "wss",
         sni: str = "www.google.com",
         obfuscation: str = "tls",
         mux: bool = True,
         padding: bool = True
     ) -> bool:
         """
-        به‌روزرسانی تنظیمات تانل
+        به‌روزرسانی تنظیمات تانل با قابلیت‌های ضد شناسایی
         
-        TCP port forwarding: ترافیک AnyConnect مستقیم فوروارد میشه
-        کلاینت → ایران:443 (Gost TCP) → فرانسه:443 (OCServ)
+        معماری:
+        📱 AnyConnect → Iran:443 (TCP) → [WSS Encrypted] → France:2083 (Gost Relay) → France:443 (OCServ) → 🌍
+        
+        DPI فقط ترافیک WebSocket HTTPS عادی بین ایران و فرانسه میبینه
         
         Args:
             remote_ip: IP سرور فرانسه
-            remote_port: پورت OCServ روی فرانسه
+            remote_port: پورت OCServ روی فرانسه (مقصد نهایی)
             local_port: پورت ورودی روی ایران (443 پیشنهادی)
-            protocol: unused (kept for API compat)
-            sni: unused
-            obfuscation: unused
-            mux: unused
-            padding: unused
+            protocol: پروتکل obfuscation (wss/h2/tls)
+            sni: SNI برای masquerading
+            mux: فعال‌سازی multiplexing
         """
         try:
-            # TCP port forwarding ساده - ترافیک شفاف فوروارد میشه
-            # AnyConnect مستقیم با OCServ فرانسه حرف میزنه
+            # پورت Gost relay روی فرانسه (همیشه 2083)
+            relay_port = 2083
+            
+            # انتخاب نوع dialer
+            dialer_type = "wss"
+            if protocol == "h2":
+                dialer_type = "h2"
+            elif protocol == "tls":
+                dialer_type = "tls"
+            
+            # کانفیگ Gost v3 با chain — ضد شناسایی
             gost_config = {
                 "Log": {
                     "Level": "info"
@@ -326,7 +335,8 @@ WantedBy=multi-user.target
                         "Name": "vpn-tunnel",
                         "Addr": f":{local_port}",
                         "Handler": {
-                            "Type": "tcp"
+                            "Type": "tcp",
+                            "Chain": "stealth-chain"
                         },
                         "Listener": {
                             "Type": "tcp"
@@ -335,10 +345,43 @@ WantedBy=multi-user.target
                             "Nodes": [
                                 {
                                     "Name": "france-ocserv",
-                                    "Addr": f"{remote_ip}:{remote_port}"
+                                    "Addr": f"127.0.0.1:{remote_port}"
                                 }
                             ]
                         }
+                    }
+                ],
+                "Chains": [
+                    {
+                        "Name": "stealth-chain",
+                        "Hops": [
+                            {
+                                "Name": "hop-0",
+                                "Nodes": [
+                                    {
+                                        "Name": "france-relay",
+                                        "Addr": f"{remote_ip}:{relay_port}",
+                                        "Connector": {
+                                            "Type": "relay"
+                                        },
+                                        "Dialer": {
+                                            "Type": dialer_type,
+                                            "TLS": {
+                                                "ServerName": sni,
+                                                "Secure": False
+                                            },
+                                            "Metadata": {
+                                                "path": "/ws/api/v1",
+                                                "header": {
+                                                    "User-Agent": ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"],
+                                                    "Accept-Language": ["en-US,en;q=0.9"]
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
                     }
                 ]
             }
@@ -346,7 +389,7 @@ WantedBy=multi-user.target
             with open(self.config_path, 'w') as f:
                 json.dump(gost_config, f, indent=2)
             
-            logger.info(f"Tunnel config updated: TCP forward :{local_port} → {remote_ip}:{remote_port}")
+            logger.info(f"Stealth tunnel config: :{local_port} → relay+{dialer_type}://{remote_ip}:{relay_port} → 127.0.0.1:{remote_port}")
             return True
         except Exception as e:
             logger.error(f"Error updating tunnel config: {e}")
