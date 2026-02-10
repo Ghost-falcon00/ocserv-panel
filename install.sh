@@ -144,12 +144,29 @@ select_server_mode() {
 install_gost() {
     log_info "Installing Gost tunnel..."
     
-    GOST_VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | grep -oP '"tag_name": "v\K[^"]+' || echo "3.0.0")
+    GOST_VERSION=$(curl -s --connect-timeout 5 https://api.github.com/repos/ginuerzh/gost/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\K[^"]+' || echo "3.0.0")
     
-    wget -q "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-amd64-${GOST_VERSION}.gz" -O /tmp/gost.gz || {
+    GOST_URL="https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-amd64-${GOST_VERSION}.gz"
+    GOST_MIRRORS=(
+        "$GOST_URL"
+        "https://gh-proxy.com/${GOST_URL}"
+        "https://ghproxy.net/${GOST_URL}"
+        "https://mirror.ghproxy.com/${GOST_URL}"
+    )
+    
+    GOST_DOWNLOADED=false
+    for url in "${GOST_MIRRORS[@]}"; do
+        log_info "Downloading Gost from: $(echo $url | cut -d'/' -f3)..."
+        if timeout 30 wget -q "$url" -O /tmp/gost.gz 2>/dev/null; then
+            GOST_DOWNLOADED=true
+            break
+        fi
+    done
+    
+    if [[ "$GOST_DOWNLOADED" == "false" ]]; then
         log_warning "Failed to download Gost, will be installed later from panel"
         return
-    }
+    fi
     
     gunzip -f /tmp/gost.gz
     mv /tmp/gost /usr/local/bin/gost
@@ -555,8 +572,73 @@ setup_panel() {
     mkdir -p $PANEL_DIR
     cd $PANEL_DIR
     
-    # Clone from GitHub
-    git clone --depth 1 https://github.com/Ghost-falcon00/ocserv-panel.git .
+    # GitHub URLs (direct + mirrors for Iran)
+    GITHUB_REPO="https://github.com/Ghost-falcon00/ocserv-panel.git"
+    GITHUB_ZIP="https://github.com/Ghost-falcon00/ocserv-panel/archive/refs/heads/main.zip"
+    
+    # Mirror/proxy URLs that work in Iran
+    MIRRORS=(
+        "https://gh-proxy.com/https://github.com/Ghost-falcon00/ocserv-panel.git"
+        "https://ghproxy.net/https://github.com/Ghost-falcon00/ocserv-panel.git"
+        "https://mirror.ghproxy.com/https://github.com/Ghost-falcon00/ocserv-panel.git"
+    )
+    
+    MIRROR_ZIPS=(
+        "https://gh-proxy.com/${GITHUB_ZIP}"
+        "https://ghproxy.net/${GITHUB_ZIP}"
+        "https://mirror.ghproxy.com/${GITHUB_ZIP}"
+    )
+    
+    CLONED=false
+    
+    # Method 1: Try direct git clone (with timeout)
+    log_info "Trying direct GitHub access..."
+    if timeout 15 git clone --depth 1 "$GITHUB_REPO" . 2>/dev/null; then
+        CLONED=true
+        log_success "Cloned from GitHub directly"
+    else
+        rm -rf .git 2>/dev/null
+        log_warning "Direct GitHub access failed (likely filtered)"
+        
+        # Method 2: Try mirror proxies
+        for mirror in "${MIRRORS[@]}"; do
+            log_info "Trying mirror: $(echo $mirror | cut -d'/' -f3)..."
+            if timeout 20 git clone --depth 1 "$mirror" . 2>/dev/null; then
+                CLONED=true
+                log_success "Cloned from mirror"
+                break
+            fi
+            rm -rf .git 2>/dev/null
+        done
+    fi
+    
+    # Method 3: Download ZIP if git clone failed
+    if [[ "$CLONED" == "false" ]]; then
+        log_info "Trying ZIP download..."
+        
+        ALL_ZIPS=("$GITHUB_ZIP" "${MIRROR_ZIPS[@]}")
+        
+        for zip_url in "${ALL_ZIPS[@]}"; do
+            log_info "Downloading from: $(echo $zip_url | cut -d'/' -f3)..."
+            if timeout 30 wget -q "$zip_url" -O /tmp/ocserv-panel.zip 2>/dev/null; then
+                if unzip -q /tmp/ocserv-panel.zip -d /tmp/ocserv-panel-tmp 2>/dev/null; then
+                    cp -a /tmp/ocserv-panel-tmp/ocserv-panel-main/* $PANEL_DIR/ 2>/dev/null || \
+                    cp -a /tmp/ocserv-panel-tmp/*/* $PANEL_DIR/ 2>/dev/null
+                    rm -rf /tmp/ocserv-panel.zip /tmp/ocserv-panel-tmp
+                    CLONED=true
+                    log_success "Downloaded and extracted from ZIP"
+                    break
+                fi
+            fi
+        done
+    fi
+    
+    if [[ "$CLONED" == "false" ]]; then
+        log_error "Cannot download OCServ Panel. Please check your internet connection."
+        log_info "You can manually download from: $GITHUB_REPO"
+        log_info "Or use a VPN/proxy to access GitHub"
+        exit 1
+    fi
     
     # Create virtual environment
     python3 -m venv venv
@@ -583,8 +665,10 @@ EOF
     chmod 755 panel/logs
     
     # Copy connect script to OCServ
-    cp scripts/check_blocked.sh /etc/ocserv/check_blocked.sh
-    chmod +x /etc/ocserv/check_blocked.sh
+    if [[ -f scripts/check_blocked.sh ]]; then
+        cp scripts/check_blocked.sh /etc/ocserv/check_blocked.sh
+        chmod +x /etc/ocserv/check_blocked.sh
+    fi
     
     log_success "Panel installed"
 }
