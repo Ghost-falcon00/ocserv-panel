@@ -127,15 +127,15 @@ select_server_mode() {
     case $mode_choice in
         1)
             SERVER_MODE="iran"
-            log_info "Mode: Iran Server [with Tunnel]"
+            log_info "حالت: سرور ایران (با تانل)"
             ;;
         2)
             SERVER_MODE="france"
-            log_info "Mode: Foreign Server [NO Tunnel]"
+            log_info "حالت: سرور خارج (بدون تانل)"
             ;;
         *)
             SERVER_MODE="iran"
-            log_info "Default: Iran Server"
+            log_info "حالت پیش‌فرض: سرور ایران"
             ;;
     esac
 }
@@ -266,21 +266,6 @@ install_dependencies() {
     log_success "Dependencies installed"
 }
 
-function create_self_signed_cert() {
-    log_info "Generating self-signed certificate (valid for 10 years)..."
-    
-    openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
-        -subj "/C=IR/ST=Tehran/L=Tehran/O=OCServ/CN=$DOMAIN" \
-        -keyout /etc/ocserv/ssl/server-key.pem \
-        -out /etc/ocserv/ssl/server-cert.pem \
-        > /dev/null 2>&1
-    
-    chmod 600 /etc/ocserv/ssl/*.pem
-    
-    log_success "Self-signed certificate created"
-    log_warning "Note: Clients will see a certificate warning (normal for self-signed)"
-}
-
 setup_ssl() {
     log_info "Setting up SSL certificate for $DOMAIN..."
     
@@ -297,87 +282,119 @@ setup_ssl() {
         return
     fi
     
-    # Check if port 80 is available
-    PORT_80_BUSY=false
+    # Actually check if port 80 is available
+    PORT80_FREE=true
     if ss -tuln 2>/dev/null | grep -q ":80 " || netstat -tuln 2>/dev/null | grep -q ":80 "; then
-        PORT_80_BUSY=true
-        log_warning "Port 80 is in use by another service"
+        PORT80_FREE=false
+        PORT80_PROCESS=$(ss -tlnp 2>/dev/null | grep ":80 " | head -1 || echo "unknown")
+        log_warning "Port 80 is in use by: $PORT80_PROCESS"
     fi
     
-    # Check if domain resolves to this server
-    DOMAIN_IP=$(dig +short $DOMAIN 2>/dev/null | head -1)
-    if [[ "$DOMAIN_IP" != "$PUBLIC_IP" ]]; then
-        log_warning "Domain $DOMAIN does not point to this server ($PUBLIC_IP)"
-        log_warning "DNS record points to: $DOMAIN_IP"
-    fi
-    
-    # Ask user about SSL type
-    echo ""
-    if [[ "$PORT_80_BUSY" == "true" ]]; then
-        log_warning "Port 80 is busy. Let's Encrypt requires port 80 to be free."
-        read -p "$(echo -e ${YELLOW}Use self-signed certificate? [Y/n]: ${NC})" USE_SELFSIGNED
-        USE_SELFSIGNED=${USE_SELFSIGNED:-y}
-    else
-        log_info "Port 80 is available for Let's Encrypt"
-        read -p "$(echo -e ${YELLOW}Try Let's Encrypt certificate? [Y/n]: ${NC})" TRY_LETSENCRYPT
-        TRY_LETSENCRYPT=${TRY_LETSENCRYPT:-y}
+    if [[ "$PORT80_FREE" == "true" ]]; then
+        # Port 80 is free - try Let's Encrypt automatically
+        log_info "Port 80 is available. Attempting Let's Encrypt certificate..."
         
-        if [[ "$TRY_LETSENCRYPT" =~ ^[Nn]$ ]]; then
-            USE_SELFSIGNED="y"
-        else
-            USE_SELFSIGNED="n"
-        fi
-    fi
-    
-    if [[ "$USE_SELFSIGNED" =~ ^[Yy]$ ]]; then
-        log_info "Creating self-signed certificate..."
-        create_self_signed_cert
-    else
-        log_info "Attempting to get Let's Encrypt certificate..."
-        
-        # Stop services that might use port 80
+        # Stop services that might interfere
         systemctl stop nginx 2>/dev/null || true
         systemctl stop apache2 2>/dev/null || true
         systemctl stop ocserv 2>/dev/null || true
-        fuser -k 80/tcp 2>/dev/null || true
         
-        sleep 2
+        sleep 1
         
-        # Try snap certbot first
+        # Install certbot
         if command -v snap &> /dev/null; then
             snap install core 2>/dev/null || true
             snap install --classic certbot 2>/dev/null || true
-            ln -sf /snap/bin/certbot /usr/bin/certbot 2>/dev/null || true
             CERTBOT_CMD="/snap/bin/certbot"
         else
-            # Install certbot via apt if snap not available
             apt-get install -y -qq certbot > /dev/null 2>&1 || true
             CERTBOT_CMD="certbot"
         fi
         
         # Try to get certificate
-        if $CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
-            --email admin@$DOMAIN \
+        $CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
+            --register-unsafely-without-email \
             -d $DOMAIN \
-            --preferred-challenges http 2>&1; then
+            --preferred-challenges http 2>&1 | tail -5
+        
+        if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+            ln -sf /etc/letsencrypt/live/$DOMAIN/fullchain.pem /etc/ocserv/ssl/server-cert.pem
+            ln -sf /etc/letsencrypt/live/$DOMAIN/privkey.pem /etc/ocserv/ssl/server-key.pem
+            log_success "Let's Encrypt certificate obtained successfully!"
+            
+            # Setup auto-renewal
+            cat > /etc/cron.d/certbot-ocserv << 'CRONEOF'
+0 0 1 * * root certbot renew --quiet && systemctl reload ocserv
+CRONEOF
+            return
+        else
+            log_warning "Let's Encrypt failed. Maybe domain DNS is not pointing to this server?"
+            log_warning "Falling back to self-signed certificate..."
+            create_self_signed_cert
+        fi
+    else
+        # Port 80 is busy - offer choices
+        echo ""
+        log_warning "Port 80 is busy. Options:"
+        echo "  1) Free port 80 and get Let's Encrypt (recommended)"
+        echo "  2) Use self-signed certificate"
+        echo ""
+        read -p "$(echo -e ${YELLOW}Choose [1/2]: ${NC})" SSL_CHOICE
+        
+        if [[ "$SSL_CHOICE" == "1" ]]; then
+            log_info "Freeing port 80..."
+            systemctl stop nginx 2>/dev/null || true
+            systemctl stop apache2 2>/dev/null || true
+            fuser -k 80/tcp 2>/dev/null || true
+            sleep 2
+            
+            # Retry Let's Encrypt
+            if command -v snap &> /dev/null; then
+                CERTBOT_CMD="/snap/bin/certbot"
+            else
+                apt-get install -y -qq certbot > /dev/null 2>&1 || true
+                CERTBOT_CMD="certbot"
+            fi
+            
+            $CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
+                --register-unsafely-without-email \
+                -d $DOMAIN \
+                --preferred-challenges http 2>&1 | tail -5
             
             if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
                 ln -sf /etc/letsencrypt/live/$DOMAIN/fullchain.pem /etc/ocserv/ssl/server-cert.pem
                 ln -sf /etc/letsencrypt/live/$DOMAIN/privkey.pem /etc/ocserv/ssl/server-key.pem
-                log_success "Let's Encrypt certificate obtained"
+                log_success "Let's Encrypt certificate obtained!"
                 
-                # Setup auto-renewal
-                echo "0 0 1 * * root /snap/bin/certbot renew --quiet && systemctl reload ocserv" > /etc/cron.d/certbot-ocserv
+                cat > /etc/cron.d/certbot-ocserv << 'CRONEOF'
+0 0 1 * * root certbot renew --quiet && systemctl reload ocserv
+CRONEOF
                 return
+            else
+                log_warning "Let's Encrypt failed. Using self-signed..."
+                create_self_signed_cert
             fi
+        else
+            log_info "Creating self-signed certificate..."
+            create_self_signed_cert
         fi
-        
-        log_warning "Let's Encrypt failed. Creating self-signed certificate..."
-        create_self_signed_cert
     fi
 }
 
-
+create_self_signed_cert() {
+    log_info "Generating self-signed certificate (valid for 10 years)..."
+    
+    openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
+        -subj "/C=IR/ST=Tehran/L=Tehran/O=OCServ/CN=$DOMAIN" \
+        -keyout /etc/ocserv/ssl/server-key.pem \
+        -out /etc/ocserv/ssl/server-cert.pem \
+        > /dev/null 2>&1
+    
+    chmod 600 /etc/ocserv/ssl/*.pem
+    
+    log_success "Self-signed certificate created"
+    log_warning "Note: Clients will see a certificate warning (normal for self-signed)"
+}
 
 configure_ocserv() {
     log_info "Configuring OCServ with Iran-optimized settings..."
@@ -388,6 +405,117 @@ configure_ocserv() {
     fi
     
     # Create optimized config for Iran
+    cat > /etc/ocserv/ocserv.conf << EOF
+# OCServ Configuration - Optimized for Iran
+# Generated by OCServ Panel Installer
+
+# Authentication
+auth = "plain[passwd=/etc/ocserv/ocpasswd]"
+tcp-port = ${OCSERV_PORT}
+udp-port = ${OCSERV_PORT}
+
+# Performance & Security
+run-as-user = nobody
+run-as-group = daemon
+socket-file = /run/ocserv.socket
+isolate-workers = false
+
+# SSL Certificate
+server-cert = /etc/ocserv/ssl/server-cert.pem
+server-key = /etc/ocserv/ssl/server-key.pem
+
+# Connection Limits
+max-clients = 128
+max-same-clients = 4
+
+# Timeouts optimized for Iran filtering
+keepalive = 32400
+dpd = 90
+mobile-dpd = 1800
+switch-to-tcp-timeout = 25
+
+# MTU optimization for better speed
+try-mtu-discovery = true
+mtu = 1400
+
+# TLS optimization
+tls-priorities = "PERFORMANCE:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0"
+auth-timeout = 240
+idle-timeout = 1200
+mobile-idle-timeout = 2400
+min-reauth-time = 300
+rekey-time = 172800
+rekey-method = ssl
+
+# Security
+max-ban-score = 80
+ban-reset-time = 1200
+cookie-timeout = 300
+deny-roaming = false
+
+# System
+use-occtl = true
+pid-file = /run/ocserv.pid
+server-stats-reset-time = 604800
+
+# Connect script - check blocked IPs before allowing connection
+connect-script = /etc/ocserv/check_blocked.sh
+
+# Network
+device = vpns
+predictable-ips = true
+default-domain = ${DOMAIN}
+ipv4-network = 192.168.100.0
+ipv4-netmask = 255.255.255.0
+
+# DNS - Best DNS for Iran
+dns = 1.1.1.1
+dns = 1.0.0.1
+dns = 8.8.8.8
+dns = 8.8.4.4
+
+# Routing - Only filtered traffic goes through VPN
+tunnel-all-dns = true
+no-route = 192.168.0.0/255.255.0.0
+no-route = 172.16.0.0/255.240.0.0
+no-route = 10.0.0.0/255.0.0.0
+
+# Iranian sites bypass VPN (faster access)
+no-route = 2.144.0.0/255.254.0.0
+no-route = 5.22.0.0/255.255.0.0
+no-route = 5.23.0.0/255.255.0.0
+no-route = 5.52.0.0/255.252.0.0
+no-route = 5.56.0.0/255.248.0.0
+no-route = 5.74.0.0/255.254.0.0
+no-route = 5.106.0.0/255.255.0.0
+no-route = 5.112.0.0/255.248.0.0
+no-route = 5.120.0.0/255.248.0.0
+no-route = 5.144.0.0/255.240.0.0
+no-route = 5.160.0.0/255.224.0.0
+no-route = 5.190.0.0/255.254.0.0
+no-route = 5.198.0.0/255.254.0.0
+no-route = 5.200.0.0/255.248.0.0
+no-route = 31.2.0.0/255.254.0.0
+no-route = 31.7.64.0/255.255.192.0
+no-route = 31.14.0.0/255.254.0.0
+no-route = 31.24.0.0/255.248.0.0
+no-route = 31.40.0.0/255.248.0.0
+no-route = 31.56.0.0/255.248.0.0
+no-route = 31.130.0.0/255.254.0.0
+no-route = 31.170.0.0/255.254.0.0
+no-route = 31.193.192.0/255.255.192.0
+no-route = 37.9.0.0/255.255.0.0
+no-route = 37.32.0.0/255.224.0.0
+no-route = 37.63.0.0/255.255.0.0
+no-route = 37.75.0.0/255.255.0.0
+no-route = 37.98.0.0/255.254.0.0
+no-route = 37.114.0.0/255.254.0.0
+no-route = 37.129.0.0/255.255.0.0
+no-route = 37.143.0.0/255.255.0.0
+no-route = 37.152.0.0/255.248.0.0
+no-route = 37.191.0.0/255.255.0.0
+no-route = 37.202.0.0/255.254.0.0
+no-route = 37.228.0.0/255.252.0.0
 no-route = 37.235.0.0/255.255.0.0
 
 ping-leases = false
@@ -427,20 +555,8 @@ setup_panel() {
     mkdir -p $PANEL_DIR
     cd $PANEL_DIR
     
-    # Clone from GitHub with Proxy fallback
-    log_info "Cloning panel repository..."
-    if git clone --depth 1 https://github.com/Ghost-falcon00/ocserv-panel.git .; then
-        log_success "Cloned from GitHub"
-    else
-        log_warning "GitHub clone failed. Trying via GH Proxy..."
-        if git clone --depth 1 https://gh-proxy.com/github.com/Ghost-falcon00/ocserv-panel.git .; then
-            log_success "Cloned via GH Proxy"
-        else
-            log_error "Failed to clone panel. Please check internet connection or upload files manually to $PANEL_DIR"
-            log_info "Manual install: Upload all files to $PANEL_DIR and run this script again."
-            exit 1
-        fi
-    fi
+    # Clone from GitHub
+    git clone --depth 1 https://github.com/Ghost-falcon00/ocserv-panel.git .
     
     # Create virtual environment
     python3 -m venv venv
@@ -508,21 +624,23 @@ EOF
 create_systemd_service() {
     log_info "Creating systemd service..."
     
-    echo "[Unit]" > /etc/systemd/system/ocserv-panel.service
-    echo "Description=OCServ Management Panel" >> /etc/systemd/system/ocserv-panel.service
-    echo "After=network.target ocserv.service" >> /etc/systemd/system/ocserv-panel.service
-    echo "" >> /etc/systemd/system/ocserv-panel.service
-    echo "[Service]" >> /etc/systemd/system/ocserv-panel.service
-    echo "Type=simple" >> /etc/systemd/system/ocserv-panel.service
-    echo "User=root" >> /etc/systemd/system/ocserv-panel.service
-    echo "WorkingDirectory=${PANEL_DIR}/panel" >> /etc/systemd/system/ocserv-panel.service
-    echo "Environment=\"PATH=${PANEL_DIR}/venv/bin:\$PATH\"" >> /etc/systemd/system/ocserv-panel.service
-    echo "ExecStart=${PANEL_DIR}/venv/bin/uvicorn app:app --host 0.0.0.0 --port ${PANEL_PORT} --workers 1 --ssl-keyfile /etc/ocserv/ssl/server-key.pem --ssl-certfile /etc/ocserv/ssl/server-cert.pem" >> /etc/systemd/system/ocserv-panel.service
-    echo "Restart=always" >> /etc/systemd/system/ocserv-panel.service
-    echo "RestartSec=3" >> /etc/systemd/system/ocserv-panel.service
-    echo "" >> /etc/systemd/system/ocserv-panel.service
-    echo "[Install]" >> /etc/systemd/system/ocserv-panel.service
-    echo "WantedBy=multi-user.target" >> /etc/systemd/system/ocserv-panel.service
+    cat > /etc/systemd/system/ocserv-panel.service << EOF
+[Unit]
+Description=OCServ Management Panel
+After=network.target ocserv.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${PANEL_DIR}/panel
+Environment="PATH=${PANEL_DIR}/venv/bin:\$PATH"
+ExecStart=${PANEL_DIR}/venv/bin/uvicorn app:app --host 0.0.0.0 --port ${PANEL_PORT} --workers 1 --ssl-keyfile /etc/ocserv/ssl/server-key.pem --ssl-certfile /etc/ocserv/ssl/server-cert.pem
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
     systemctl daemon-reload
     systemctl enable ocserv-panel
@@ -537,43 +655,115 @@ optimize_vps_network() {
     # TCP BBR + Advanced Network Optimization
     # ═══════════════════════════════════════════════════════════
     
-    # Create optimized systemctl config
-    echo "# OCServ Panel - VPS Network Optimization" > /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv6.conf.all.forwarding = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.core.default_qdisc = fq" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_congestion_control = bbr" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.core.rmem_default = 1048576" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.core.rmem_max = 16777216" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_rmem = 4096 1048576 16777216" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.core.wmem_default = 1048576" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.core.wmem_max = 16777216" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_wmem = 4096 1048576 16777216" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_fin_timeout = 15" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_tw_reuse = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_keepalive_time = 600" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_keepalive_intvl = 60" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_keepalive_probes = 5" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_timestamps = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_sack = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_mtu_probing = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_ecn = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.ip_local_port_range = 1024 65535" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_syncookies = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_max_orphans = 65536" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.conf.all.rp_filter = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.conf.default.rp_filter = 1" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.conf.all.accept_redirects = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.conf.default.accept_redirects = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.conf.all.send_redirects = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.conf.default.send_redirects = 0" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.tcp_mem = 786432 1048576 1572864" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.ipv4.udp_mem = 786432 1048576 1572864" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.netfilter.nf_conntrack_max = 1048576" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "net.nf_conntrack_max = 1048576" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "vm.swappiness = 10" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "vm.dirty_ratio = 60" >> /etc/sysctl.d/99-ocserv-optimized.conf
-    echo "vm.dirty_background_ratio = 5" >> /etc/sysctl.d/99-ocserv-optimized.conf
+    cat > /etc/sysctl.d/99-ocserv-optimized.conf << 'EOF'
+# ╔═══════════════════════════════════════════════════════════╗
+# ║      OCServ Panel - VPS Network Optimization              ║
+# ║      بهینه‌سازی شبکه برای حداکثر سرعت و پایداری            ║
+# ╚═══════════════════════════════════════════════════════════╝
+
+# ═══════════════════════════════════════════════════════════
+# IP Forwarding - ضروری برای VPN
+# ═══════════════════════════════════════════════════════════
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+
+# ═══════════════════════════════════════════════════════════
+# TCP BBR Congestion Control - بهترین الگوریتم برای سرعت
+# ═══════════════════════════════════════════════════════════
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+# ═══════════════════════════════════════════════════════════
+# TCP Buffer Optimization - افزایش سرعت انتقال
+# ═══════════════════════════════════════════════════════════
+# افزایش بافر دریافت
+net.core.rmem_default = 1048576
+net.core.rmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 1048576 16777216
+
+# افزایش بافر ارسال
+net.core.wmem_default = 1048576
+net.core.wmem_max = 16777216
+net.ipv4.tcp_wmem = 4096 1048576 16777216
+
+# بافر عمومی
+net.core.optmem_max = 65535
+net.core.netdev_max_backlog = 65536
+
+# ═══════════════════════════════════════════════════════════
+# TCP Performance Tuning - بهینه‌سازی عملکرد TCP
+# ═══════════════════════════════════════════════════════════
+# فعال کردن TCP Fast Open - اتصال سریع‌تر
+net.ipv4.tcp_fastopen = 3
+
+# Window Scaling - پنجره بزرگ‌تر = سرعت بیشتر
+net.ipv4.tcp_window_scaling = 1
+
+# افزایش محدودیت اتصالات
+net.ipv4.tcp_max_syn_backlog = 65536
+net.core.somaxconn = 65535
+
+# کاهش زمان انتظار اتصالات
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_tw_reuse = 1
+
+# Keepalive بهینه
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 60
+net.ipv4.tcp_keepalive_probes = 5
+
+# غیرفعال کردن Timestamps (کاهش فیلترینگ)
+net.ipv4.tcp_timestamps = 0
+
+# غیرفعال کردن SACK (برخی فیلترها ازش استفاده میکنن)
+net.ipv4.tcp_sack = 0
+
+# MTU Probing - کشف بهترین MTU
+net.ipv4.tcp_mtu_probing = 1
+
+# ═══════════════════════════════════════════════════════════
+# Anti-Filtering Settings - ضد فیلترینگ
+# ═══════════════════════════════════════════════════════════
+# غیرفعال کردن ECN (فیلترها ازش استفاده میکنن)
+net.ipv4.tcp_ecn = 0
+
+# افزایش تنوع پورت منبع
+net.ipv4.ip_local_port_range = 1024 65535
+
+# ═══════════════════════════════════════════════════════════
+# Security Hardening - امنیت
+# ═══════════════════════════════════════════════════════════
+# محافظت در برابر SYN Flood
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_max_orphans = 65536
+
+# جلوگیری از IP Spoofing
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# غیرفعال کردن ICMP Redirect (امنیت بالاتر)
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# ═══════════════════════════════════════════════════════════
+# Memory Optimization - بهینه‌سازی حافظه
+# ═══════════════════════════════════════════════════════════
+net.ipv4.tcp_mem = 786432 1048576 1572864
+net.ipv4.udp_mem = 786432 1048576 1572864
+
+# ═══════════════════════════════════════════════════════════
+# Connection Tracking - برای NAT بهتر
+# ═══════════════════════════════════════════════════════════
+net.netfilter.nf_conntrack_max = 1048576
+net.nf_conntrack_max = 1048576
+
+# VFS Cache
+vm.swappiness = 10
+vm.dirty_ratio = 60
+vm.dirty_background_ratio = 5
+EOF
 
     # اعمال تنظیمات
     sysctl -p /etc/sysctl.d/99-ocserv-optimized.conf > /dev/null 2>&1 || true
@@ -581,8 +771,8 @@ optimize_vps_network() {
     log_success "VPS network optimized with BBR + advanced settings"
 }
 
-function setup_firewall() {
-    log_info "Configuring firewall [safe mode - will not break existing rules]..."
+setup_firewall() {
+    log_info "Configuring firewall (safe mode - won't break existing rules)..."
     
     # Get default interface
     DEFAULT_IF=$(ip route | grep default | awk '{print $5}' | head -1)
@@ -639,13 +829,13 @@ function setup_firewall() {
         ufw allow ${OCSERV_PORT}/udp > /dev/null 2>&1 || true
         ufw allow ${PANEL_PORT}/tcp > /dev/null 2>&1 || true
         
-        log_info "UFW rules added [SSH: allowed, VPN: ${OCSERV_PORT}, Panel: ${PANEL_PORT}]"
+        log_info "UFW rules added (SSH: allowed, VPN: ${OCSERV_PORT}, Panel: ${PANEL_PORT})"
     fi
     
-    log_success "Firewall configured [safe mode - existing rules preserved]"
+    log_success "Firewall configured (safe mode - existing rules preserved)"
 }
 
-function start_services() {
+start_services() {
     log_info "Starting services..."
     
     systemctl restart ocserv
@@ -760,7 +950,7 @@ main() {
         echo ""
         echo -e "  ${YELLOW}مراحل تنظیم تانل:${NC}"
         echo -e "  1. وارد پنل شو و به بخش ${GREEN}تانل${NC} برو"
-        echo -e "  2. IP سرور خارج [فرانسه] رو وارد کن"
+        echo -e "  2. IP سرور خارج (فرانسه) رو وارد کن"
         echo -e "  3. تانل رو روشن کن"
         echo ""
         echo -e "  ${YELLOW}روی سرور خارج این دستور رو بزن:${NC}"
