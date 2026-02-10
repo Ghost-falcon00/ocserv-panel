@@ -140,40 +140,130 @@ select_server_mode() {
     esac
 }
 
-# Install Gost for tunnel
+# Install Gost v3 for tunnel
 install_gost() {
-    log_info "Installing Gost tunnel..."
+    log_info "Installing Gost v3 tunnel..."
     
-    GOST_VERSION=$(curl -s --connect-timeout 5 https://api.github.com/repos/ginuerzh/gost/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\K[^"]+' || echo "3.0.0")
-    
-    GOST_URL="https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-amd64-${GOST_VERSION}.gz"
-    GOST_MIRRORS=(
-        "$GOST_URL"
-        "https://gh-proxy.com/${GOST_URL}"
-        "https://ghproxy.net/${GOST_URL}"
-        "https://mirror.ghproxy.com/${GOST_URL}"
-    )
-    
-    GOST_DOWNLOADED=false
-    for url in "${GOST_MIRRORS[@]}"; do
-        log_info "Downloading Gost from: $(echo $url | cut -d'/' -f3)..."
-        if timeout 30 wget -q "$url" -O /tmp/gost.gz 2>/dev/null; then
-            GOST_DOWNLOADED=true
-            break
-        fi
-    done
-    
-    if [[ "$GOST_DOWNLOADED" == "false" ]]; then
-        log_warning "Failed to download Gost, will be installed later from panel"
+    # Check if already installed
+    if command -v gost &> /dev/null; then
+        CURRENT_VER=$(gost -V 2>&1 | head -1)
+        log_success "Gost already installed: $CURRENT_VER"
+        mkdir -p /etc/gost
+        create_gost_service
         return
     fi
     
-    gunzip -f /tmp/gost.gz
+    GOST_VERSION="3.2.6"
+    GOST_FILE="gost_${GOST_VERSION}_linux_amd64.tar.gz"
+    GOST_URL="https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/${GOST_FILE}"
+    
+    # لیست میرورها (پروکسی‌های GitHub برای ایران)
+    GOST_MIRRORS=(
+        "https://ghproxy.net/${GOST_URL}"
+        "https://gh-proxy.com/${GOST_URL}"
+        "https://ghfast.top/${GOST_URL}"
+        "https://gh.ddlc.top/${GOST_URL}"
+        "https://mirror.ghproxy.com/${GOST_URL}"
+        "$GOST_URL"
+    )
+    
+    GOST_DOWNLOADED=false
+    
+    # تلاش با wget
+    for url in "${GOST_MIRRORS[@]}"; do
+        src=$(echo "$url" | cut -d'/' -f3)
+        echo -ne "  ⏳ wget ${CYAN}${src}${NC} ... "
+        
+        if timeout 15 wget --timeout=10 --tries=1 -q "$url" -O /tmp/gost.tar.gz 2>/dev/null; then
+            SIZE=$(stat -c%s /tmp/gost.tar.gz 2>/dev/null || echo 0)
+            if [ "$SIZE" -gt 100000 ]; then
+                echo -e "${GREEN}✓ (${SIZE} bytes)${NC}"
+                GOST_DOWNLOADED=true
+                break
+            else
+                echo -e "${RED}✗ (invalid: ${SIZE} bytes)${NC}"
+                rm -f /tmp/gost.tar.gz
+            fi
+        else
+            echo -e "${RED}✗ (timeout/blocked)${NC}"
+            rm -f /tmp/gost.tar.gz 2>/dev/null
+        fi
+    done
+    
+    # تلاش با curl
+    if [[ "$GOST_DOWNLOADED" == "false" ]]; then
+        log_info "Trying with curl..."
+        for url in "${GOST_MIRRORS[@]}"; do
+            src=$(echo "$url" | cut -d'/' -f3)
+            echo -ne "  ⏳ curl ${CYAN}${src}${NC} ... "
+            
+            if curl -sL --connect-timeout 10 --max-time 30 -o /tmp/gost.tar.gz "$url" 2>/dev/null; then
+                SIZE=$(stat -c%s /tmp/gost.tar.gz 2>/dev/null || echo 0)
+                if [ "$SIZE" -gt 100000 ]; then
+                    echo -e "${GREEN}✓ (${SIZE} bytes)${NC}"
+                    GOST_DOWNLOADED=true
+                    break
+                else
+                    echo -e "${RED}✗ (invalid: ${SIZE} bytes)${NC}"
+                    rm -f /tmp/gost.tar.gz
+                fi
+            else
+                echo -e "${RED}✗${NC}"
+                rm -f /tmp/gost.tar.gz 2>/dev/null
+            fi
+        done
+    fi
+    
+    if [[ "$GOST_DOWNLOADED" == "false" ]]; then
+        echo ""
+        log_warning "Could not download Gost from mirrors!"
+        echo -e "  ${YELLOW}You can install it manually later:${NC}"
+        echo ""
+        echo -e "  ${CYAN}# On your France server:${NC}"
+        echo "  wget '${GOST_URL}' -O /tmp/gost.tar.gz"
+        echo "  scp /tmp/gost.tar.gz root@$(get_public_ip):/tmp/gost.tar.gz"
+        echo ""
+        echo -e "  ${CYAN}# Then on this server:${NC}"
+        echo "  tar -xzf /tmp/gost.tar.gz -C /tmp/"
+        echo "  cp /tmp/gost /usr/local/bin/gost"
+        echo "  chmod +x /usr/local/bin/gost"
+        echo "  systemctl restart gost"
+        echo ""
+        
+        # ساختن سرویس حتی بدون باینری
+        mkdir -p /etc/gost
+        create_gost_service
+        return
+    fi
+    
+    # نصب
+    log_info "Extracting and installing..."
+    tar -xzf /tmp/gost.tar.gz -C /tmp/
+    
+    if [ ! -f "/tmp/gost" ]; then
+        log_error "Extraction failed - gost binary not found in archive"
+        rm -f /tmp/gost.tar.gz
+        return
+    fi
+    
     mv /tmp/gost /usr/local/bin/gost
     chmod +x /usr/local/bin/gost
-    mkdir -p /etc/gost
+    rm -f /tmp/gost.tar.gz
     
-    # Create systemd service
+    # بررسی نصب
+    if gost -V &>/dev/null; then
+        log_success "Gost installed: $(gost -V 2>&1 | head -1)"
+    else
+        log_error "Gost binary exists but failed to run"
+        return
+    fi
+    
+    mkdir -p /etc/gost
+    create_gost_service
+}
+
+# Create Gost systemd service
+create_gost_service() {
     cat > /etc/systemd/system/gost.service << 'EOF'
 [Unit]
 Description=Gost Tunnel Service
@@ -184,14 +274,13 @@ Type=simple
 ExecStart=/usr/local/bin/gost -C /etc/gost/config.json
 Restart=always
 RestartSec=5
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
 EOF
     
     systemctl daemon-reload
-    
-    log_success "Gost installed"
 }
 
 get_user_input() {
