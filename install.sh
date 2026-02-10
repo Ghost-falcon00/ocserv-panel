@@ -641,12 +641,16 @@ setup_panel() {
     fi
     
     # Create virtual environment
+    log_info "Creating Python virtual environment..."
     python3 -m venv venv
     source venv/bin/activate
+    log_success "Virtual environment created"
     
     # Install Python dependencies
-    pip install -q --upgrade pip
-    pip install -q -r panel/requirements.txt
+    log_info "Installing Python dependencies (this may take a few minutes)..."
+    pip install --upgrade pip 2>&1 | tail -1
+    pip install -r panel/requirements.txt 2>&1 | tail -5
+    log_success "Python dependencies installed"
     
     # Create .env file with settings
     cat > panel/.env << EOF
