@@ -201,6 +201,54 @@
     </div>
 </div>
 
+<!-- Remote Sync Config -->
+<div class="card sync-card">
+    <div class="card-header">
+        <h2>🔄 سینک با سرور فرانسه</h2>
+        <span class="sync-badge" id="sync-badge">غیرفعال</span>
+    </div>
+    <div class="card-body">
+        <div class="sync-status" id="sync-status">
+            <div class="sync-indicator" id="sync-indicator">⚫</div>
+            <span id="sync-message">در حال بررسی...</span>
+        </div>
+
+        <form id="sync-config-form" onsubmit="saveSyncConfig(event)">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="sync_ip">IP سرور فرانسه</label>
+                    <input type="text" id="sync_ip" name="sync_ip" placeholder="185.171.202.155">
+                    <small>همون IP سرور فرانسه</small>
+                </div>
+                <div class="form-group">
+                    <label for="sync_port">پورت Remote API</label>
+                    <input type="number" id="sync_port" name="sync_port" value="6443" min="1" max="65535">
+                    <small>پیش‌فرض: 6443</small>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex: 2">
+                    <label for="sync_token">توکن API</label>
+                    <input type="text" id="sync_token" name="sync_token" placeholder="توکنی که france-setup.sh بهت داد">
+                    <small>توکن امنیتی از خروجی اسکریپت نصب فرانسه</small>
+                </div>
+            </div>
+            <div class="form-actions" style="gap: 12px; justify-content: flex-start">
+                <button type="submit" class="btn btn-primary">
+                    💾 ذخیره سینک
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="testSyncConnection()">
+                    🔍 تست ارتباط
+                </button>
+            </div>
+        </form>
+
+        <div class="sync-info">
+            <small>⚡ وقتی سینک فعال بشه، کاربرانی که توی پنل میسازی خودکار روی فرانسه هم ساخته میشن</small>
+        </div>
+    </div>
+</div>
+
 <!-- Help Section -->
 <div class="card help-card">
     <div class="card-header">
@@ -216,6 +264,7 @@
                 <li>یه SNI انتخاب کن (ترافیکت شبیه اون سایت میشه)</li>
                 <li><strong>Multiplexing</strong> و <strong>Padding</strong> رو فعال بذار</li>
                 <li>ذخیره کن و "شروع" رو بزن</li>
+                <li><strong>سینک</strong> رو تنظیم کن تا کاربران خودکار به فرانسه منتقل بشن</li>
             </ol>
         </div>
         <div class="help-section success">
@@ -225,6 +274,7 @@
                 <li><strong>SNI Masquerade:</strong> فیلترچی فکر میکنه داری گوگل رو باز میکنی</li>
                 <li><strong>Multiplexing:</strong> پترن ترافیک VPN رو مخفی میکنه</li>
                 <li><strong>Padding:</strong> سایز پکت‌ها تصادفی میشه</li>
+                <li><strong>سینک خودکار:</strong> کاربران و تنظیمات بین ایران و فرانسه هماهنگ میشن</li>
             </ul>
         </div>
         <div class="help-section warning">
@@ -540,6 +590,51 @@
         padding: 24px;
     }
 
+    /* Sync Card */
+    .sync-card {
+        margin-top: 24px;
+    }
+
+    .sync-card .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .sync-badge {
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        background: rgba(239, 68, 68, 0.2);
+        color: #ef4444;
+    }
+
+    .sync-badge.connected {
+        background: rgba(34, 197, 94, 0.2);
+        color: #22c55e;
+    }
+
+    .sync-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        margin-bottom: 16px;
+        font-size: 0.9rem;
+    }
+
+    .sync-info {
+        margin-top: 16px;
+        padding: 10px 14px;
+        background: rgba(99, 102, 241, 0.1);
+        border-radius: 8px;
+        border-right: 3px solid var(--primary);
+        color: var(--text-secondary);
+    }
+
     /* Responsive */
     @media (max-width: 768px) {
         .tunnel-status-card {
@@ -564,6 +659,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         loadTunnelStatus();
         loadTunnelConfig();
+        loadSyncStatus();
     });
 
     async function loadTunnelStatus() {
@@ -821,6 +917,94 @@
             window.showToast(message, type);
         } else {
             alert(message);
+        }
+    }
+
+    // ========== Sync Functions ==========
+
+    async function loadSyncStatus() {
+        try {
+            const response = await fetch('/api/tunnel/sync/status', {
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                const badge = document.getElementById('sync-badge');
+                const indicator = document.getElementById('sync-indicator');
+                const message = document.getElementById('sync-message');
+
+                if (data.connected) {
+                    badge.textContent = 'متصل ✓';
+                    badge.className = 'sync-badge connected';
+                    indicator.textContent = '🟢';
+                } else if (data.enabled) {
+                    badge.textContent = 'قطع';
+                    badge.className = 'sync-badge';
+                    indicator.textContent = '🔴';
+                } else {
+                    badge.textContent = 'غیرفعال';
+                    badge.className = 'sync-badge';
+                    indicator.textContent = '⚫';
+                }
+                message.textContent = data.message || '';
+
+                // Fill form
+                if (data.remote_ip) {
+                    document.getElementById('sync_ip').value = data.remote_ip;
+                    document.getElementById('sync_port').value = data.remote_api_port || 6443;
+                }
+            }
+        } catch (error) {
+            console.error('Error loading sync status:', error);
+        }
+    }
+
+    async function saveSyncConfig(event) {
+        event.preventDefault();
+
+        const config = {
+            enabled: true,
+            remote_ip: document.getElementById('sync_ip').value,
+            remote_api_port: parseInt(document.getElementById('sync_port').value),
+            api_token: document.getElementById('sync_token').value
+        };
+
+        if (!config.remote_ip || !config.api_token) {
+            showNotification('IP و توکن رو وارد کن', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/tunnel/sync/config', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${getToken()}`
+                },
+                body: JSON.stringify(config)
+            });
+
+            const data = await response.json();
+            showNotification(data.message, data.success ? 'success' : 'warning');
+            loadSyncStatus();
+        } catch (error) {
+            showNotification('خطا در ارتباط با سرور', 'error');
+        }
+    }
+
+    async function testSyncConnection() {
+        try {
+            showNotification('در حال تست ارتباط...', 'info');
+            const response = await fetch('/api/tunnel/sync/test', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` }
+            });
+
+            const data = await response.json();
+            showNotification(data.message, data.success ? 'success' : 'error');
+            loadSyncStatus();
+        } catch (error) {
+            showNotification('خطا در تست ارتباط', 'error');
         }
     }
 </script>

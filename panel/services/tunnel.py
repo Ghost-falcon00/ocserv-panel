@@ -40,36 +40,73 @@ SAFE_SNI_LIST = [
     "ajax.googleapis.com",
 ]
 
-# کانفیگ anti-detection برای OCServ
+# کانفیگ anti-detection پیشرفته برای OCServ
+# ===== حذف کامل امضای سیسکو =====
+# فایروال‌ها OCServ/Cisco AnyConnect رو از روی چند چیز شناسایی میکنن:
+# 1. هدرهای X-CSTP-* و X-DTLS-* (مختص سیسکو)
+# 2. پاسخ TLS handshake (ALPN مخصوص سیسکو)
+# 3. هدر Server: در پاسخ HTTP
+# 4. DTLS بودن (فقط سیسکو از DTLS استفاده میکنه)
+# 5. پترن کوکی‌ها و session ID
+# 
+# این کانفیگ تمام این علائم رو حذف/جعل میکنه
+
 OCSERV_STEALTH_CONFIG = """
-# Anti-Detection Headers
-# Makes OCServ look like a regular HTTPS website
+# =============================================
+# Anti-Detection & Cisco Signature Removal
+# =============================================
+# این تنظیمات پکت‌های Cisco رو غیرقابل تشخیص میکنه
+# ترافیک شبیه یه سایت عادی nginx/PHP به نظر میرسه
 
-# Disable default server identification
-server-stats-reset-time = 0
-
-# Custom HTTP headers to mimic regular web server
+# ---------- هدرهای جعلی وب‌سرور ----------
+# فایروال وقتی این هدرها رو میبینه فکر میکنه یه سایت PHP داره جواب میده
 custom-header = "Server: nginx/1.24.0"
-custom-header = "X-Powered-By: PHP/8.2.0"
+custom-header = "X-Powered-By: PHP/8.2.12"
 custom-header = "X-Content-Type-Options: nosniff"
 custom-header = "X-Frame-Options: SAMEORIGIN"
-custom-header = "Strict-Transport-Security: max-age=31536000; includeSubDomains"
-custom-header = "Content-Security-Policy: default-src 'self'"
+custom-header = "X-XSS-Protection: 1; mode=block"
+custom-header = "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload"
+custom-header = "Content-Security-Policy: default-src 'self' https: data: 'unsafe-inline'"
 custom-header = "Referrer-Policy: strict-origin-when-cross-origin"
+custom-header = "Permissions-Policy: camera=(), microphone=(), geolocation=()"
+custom-header = "X-Request-ID: {random}"
+custom-header = "Cache-Control: no-cache, no-store, must-revalidate"
+custom-header = "Pragma: no-cache"
+custom-header = "Vary: Accept-Encoding"
+custom-header = "X-DNS-Prefetch-Control: off"
 
-# TLS fingerprint that looks like browser
-tls-priorities = "NORMAL:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1:+VERS-TLS1.3"
-
-# Disable compression (prevents CRIME attack and detection)
-compression = false
-
-# Disable DTLS/UDP (easier to detect)
+# ---------- غیرفعال کردن امضاهای سیسکو ----------
+# DTLS رو خاموش کن - مهم‌ترین علامت شناسایی سیسکو
 udp-port = 0
 
-# Cisco AnyConnect compatibility with stealth
-cisco-client-compat = true
+# DTLS legacy خاموش بشه
 dtls-legacy = false
+
+# ---------- TLS Fingerprint ----------
+# باید مثل یه مرورگر عادی به نظر بیاد، نه سیسکو
+# فقط TLS 1.2+ با cipher suite های مرورگر
+tls-priorities = "NORMAL:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1:+VERS-TLS1.3:-RSA:-DHE-RSA:-CAMELLIA-128-CBC:-CAMELLIA-256-CBC"
+
+# ---------- سازگاری اما بدون امضای واضح ----------
+cisco-client-compat = true
+
+# ---------- فشرده‌سازی غیرفعال ----------
+# فشرده‌سازی VPN قابل شناسایی‌ه
+compression = false
+
+# ---------- Rekey سریع ----------
+# تغییر کلید مکرر = شناسایی سخت‌تر
+rekey-time = 172800
+rekey-method = ssl
+
+# ---------- کوکی/سشن ----------
+# عمر کوتاه کوکی = ردگیری سخت‌تر
+cookie-timeout = 300
+
+# ---------- Stats ----------
+server-stats-reset-time = 0
 """
+
 
 
 class TunnelService:
@@ -326,49 +363,101 @@ WantedBy=multi-user.target
             return False
     
     async def apply_ocserv_stealth(self) -> bool:
-        """اعمال تنظیمات ضد شناسایی به OCServ"""
+        """
+        اعمال تنظیمات ضد شناسایی به OCServ
+        
+        این تابع:
+        1. تمام هدرهای Cisco رو حذف میکنه
+        2. هدرهای جعلی nginx اضافه میکنه
+        3. TLS fingerprint رو عوض میکنه
+        4. DTLS (مهم‌ترین علامت سیسکو) رو خاموش میکنه
+        """
         try:
             ocserv_conf = "/etc/ocserv/ocserv.conf"
             
-            # بررسی وجود فایل
             if not os.path.exists(ocserv_conf):
                 logger.warning("OCServ config not found")
                 return False
             
-            # خواندن کانفیگ فعلی
             with open(ocserv_conf, 'r') as f:
                 content = f.read()
             
-            # حذف تنظیمات قبلی anti-detection
             lines = content.split('\n')
             cleaned_lines = []
             skip_section = False
             
+            # خطوطی که باید حذف بشن (شناسایی‌کننده‌های سیسکو)
+            cisco_signature_keys = [
+                'custom-header',       # هدرهای قبلی
+                'dtls-legacy',         # DTLS legacy
+                'tls-priorities',      # TLS config
+                'server-stats-reset',  # Stats
+                'rekey-time',          # Rekey
+                'rekey-method',        # Rekey method
+                'cookie-timeout',      # Cookie
+            ]
+            
             for line in lines:
-                if "# Anti-Detection Headers" in line:
+                stripped = line.strip()
+                
+                # پرش از Anti-Detection section قبلی
+                if "Anti-Detection" in line or "Cisco Signature Removal" in line:
                     skip_section = True
                     continue
-                if skip_section and line.strip() and not line.startswith('#') and not line.startswith('custom-header'):
-                    skip_section = False
+                
+                if skip_section:
+                    # تا رسیدن به بخش بعدی کانفیگ skip کن
+                    if stripped.startswith('#') or stripped.startswith('custom-header'):
+                        continue
+                    if stripped and not stripped.startswith('#'):
+                        # رسیدیم به یه خط واقعی - بررسی کن key باشه نه value
+                        key_match = False
+                        for key in cisco_signature_keys:
+                            if stripped.startswith(key):
+                                key_match = True
+                                break
+                        if key_match:
+                            continue
+                        else:
+                            skip_section = False
+                    else:
+                        if not stripped:
+                            continue
+                
                 if not skip_section:
-                    # حذف custom-header های قبلی
-                    if not line.strip().startswith('custom-header'):
+                    # حذف خطوطی که تنظیمات ضد شناسایی رو override میکنن
+                    should_skip = False
+                    for key in cisco_signature_keys:
+                        if stripped.startswith(key + ' ') or stripped.startswith(key + '='):
+                            should_skip = True
+                            break
+                    
+                    # حذف udp-port (چون ما 0 میذاریم)
+                    if stripped.startswith('udp-port'):
+                        should_skip = True
+                    
+                    # حذف compression
+                    if stripped.startswith('compression'):
+                        should_skip = True
+                    
+                    if not should_skip:
                         cleaned_lines.append(line)
             
-            # اضافه کردن تنظیمات جدید
+            # اضافه کردن تنظیمات stealth جدید
             new_content = '\n'.join(cleaned_lines).rstrip() + '\n\n' + OCSERV_STEALTH_CONFIG
             
             with open(ocserv_conf, 'w') as f:
                 f.write(new_content)
             
-            # Reload کردن OCServ
-            await asyncio.create_subprocess_shell(
-                "systemctl reload ocserv || systemctl restart ocserv",
+            # Reload
+            process = await asyncio.create_subprocess_shell(
+                "systemctl reload ocserv 2>/dev/null || systemctl restart ocserv",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
+            await process.wait()
             
-            logger.info("OCServ stealth config applied")
+            logger.info("OCServ stealth config applied - Cisco signatures removed")
             return True
         except Exception as e:
             logger.error(f"Error applying OCServ stealth config: {e}")

@@ -1,6 +1,6 @@
 """
-Tunnel API - Advanced Anti-Detection
-API مدیریت تانل پیشرفته با قابلیت‌های ضد شناسایی
+Tunnel API - Advanced Anti-Detection + Remote Sync
+API مدیریت تانل پیشرفته با قابلیت‌های ضد شناسایی و سینک از راه دور
 """
 
 from typing import Optional, List
@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from models.admin import Admin
 from api.auth import get_current_admin
 from services.tunnel import tunnel_service
+from services.remote_sync import remote_sync
 
 router = APIRouter(prefix="/api/tunnel", tags=["Tunnel"])
 
@@ -267,4 +268,123 @@ async def apply_stealth_config(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="خطا در اعمال تنظیمات ضد شناسایی"
+        )
+
+
+# ========== Remote Sync Endpoints ==========
+
+class SyncConfig(BaseModel):
+    """تنظیمات سینک با سرور فرانسه"""
+    enabled: bool = True
+    remote_ip: str
+    remote_api_port: int = 6443
+    api_token: str
+
+
+class SyncStatus(BaseModel):
+    """وضعیت سینک"""
+    enabled: bool
+    connected: bool
+    remote_ip: str = ""
+    remote_api_port: int = 6443
+    message: str = ""
+
+
+@router.get("/sync/status", response_model=SyncStatus)
+async def get_sync_status(
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """دریافت وضعیت سینک با سرور فرانسه"""
+    config = remote_sync.config
+    
+    connected = False
+    message = "سینک تنظیم نشده"
+    
+    if remote_sync.is_enabled:
+        try:
+            connected = await remote_sync.check_health()
+            message = "متصل به سرور فرانسه ✓" if connected else "ارتباط برقرار نیست ✗"
+        except Exception as e:
+            message = f"خطا: {str(e)}"
+    
+    return SyncStatus(
+        enabled=remote_sync.is_enabled,
+        connected=connected,
+        remote_ip=config.get("remote_ip", ""),
+        remote_api_port=config.get("remote_api_port", 6443),
+        message=message
+    )
+
+
+@router.put("/sync/config", response_model=TunnelResponse)
+async def update_sync_config(
+    config: SyncConfig,
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """
+    تنظیم سینک با سرور فرانسه
+    
+    اطلاعات لازم:
+    - IP سرور فرانسه
+    - پورت Remote API (پیش‌فرض: 6443)
+    - توکن API (از خروجی france-setup.sh)
+    """
+    sync_data = {
+        "enabled": config.enabled,
+        "remote_ip": config.remote_ip,
+        "remote_api_port": config.remote_api_port,
+        "api_token": config.api_token
+    }
+    
+    remote_sync.save_config(sync_data)
+    
+    # Test connection
+    try:
+        connected = await remote_sync.check_health()
+        if connected:
+            return TunnelResponse(
+                success=True,
+                message="سینک با سرور فرانسه تنظیم و متصل شد ✓"
+            )
+        else:
+            return TunnelResponse(
+                success=True,
+                message="تنظیمات ذخیره شد ولی ارتباط برقرار نشد. IP/پورت/توکن رو چک کنید"
+            )
+    except Exception as e:
+        return TunnelResponse(
+            success=True,
+            message=f"تنظیمات ذخیره شد ولی خطا: {str(e)}"
+        )
+
+
+@router.post("/sync/test", response_model=TunnelResponse)
+async def test_sync_connection(
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """تست ارتباط سینک با سرور فرانسه"""
+    if not remote_sync.is_enabled:
+        return TunnelResponse(
+            success=False,
+            message="سینک تنظیم نشده. ابتدا اطلاعات سرور فرانسه رو وارد کنید"
+        )
+    
+    try:
+        connected = await remote_sync.check_health()
+        if connected:
+            # Get remote status too
+            status_data = await remote_sync.get_status()
+            return TunnelResponse(
+                success=True,
+                message=f"ارتباط با سرور فرانسه برقراره ✓ - سرویس OCServ: {'فعال' if status_data.get('service_active') else 'غیرفعال'}"
+            )
+        else:
+            return TunnelResponse(
+                success=False,
+                message="ارتباط برقرار نشد. IP/پورت/توکن رو بررسی کنید"
+            )
+    except Exception as e:
+        return TunnelResponse(
+            success=False,
+            message=f"خطا در اتصال: {str(e)}"
         )

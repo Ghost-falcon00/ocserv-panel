@@ -1,6 +1,7 @@
 """
 OCServ Service
 سرویس ارتباط با OCServ - کنترل سرور و کاربران
+با قابلیت سینک از راه دور به سرور فرانسه
 """
 
 import asyncio
@@ -12,11 +13,26 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Import remote sync (lazy load)
+_remote_sync = None
+
+def get_remote_sync():
+    """Get remote sync service (lazy initialization)"""
+    global _remote_sync
+    if _remote_sync is None:
+        try:
+            from services.remote_sync import remote_sync
+            _remote_sync = remote_sync
+        except ImportError:
+            _remote_sync = None
+    return _remote_sync
+
 
 class OCServService:
     """
     سرویس ارتباط با OCServ
     کنترل سرور، مدیریت کاربران، و دریافت آمار
+    با قابلیت سینک خودکار به سرور فرانسه
     """
     
     def __init__(self):
@@ -24,6 +40,17 @@ class OCServService:
         self.ocpasswd = settings.OCPASSWD_PATH
         self.passwd_file = settings.OCSERV_PASSWD_PATH
         self.config_file = settings.OCSERV_CONFIG_PATH
+    
+    @property
+    def _sync(self):
+        """دسترسی به سرویس سینک"""
+        return get_remote_sync()
+    
+    @property
+    def _sync_enabled(self) -> bool:
+        """آیا سینک فعاله؟"""
+        sync = self._sync
+        return sync is not None and sync.is_enabled
     
     async def _run_command(self, cmd: List[str]) -> tuple[int, str, str]:
         """اجرای دستور و برگرداندن نتیجه"""
@@ -48,14 +75,11 @@ class OCServService:
     async def add_user(self, username: str, password: str) -> bool:
         """
         افزودن کاربر جدید به OCServ
-        از ocpasswd برای مدیریت فایل رمز عبور استفاده می‌کند
+        اگر سینک فعال باشه، روی سرور فرانسه هم ساخته میشه
         """
         try:
             import os
-            # -c flag is always required to specify password file path
             cmd = [self.ocpasswd, "-c", self.passwd_file, username]
-            
-            # Use stdin to pass password (more reliable than echo)
             password_input = f"{password}\n{password}\n"
             
             process = await asyncio.create_subprocess_exec(
@@ -66,8 +90,22 @@ class OCServService:
             )
             stdout, stderr = await process.communicate(input=password_input.encode())
             
-            if process.returncode == 0:
-                logger.info(f"User {username} added successfully")
+            local_success = process.returncode == 0
+            
+            if local_success:
+                logger.info(f"User {username} added locally")
+                
+                # Sync to France server
+                if self._sync_enabled:
+                    try:
+                        remote_ok = await self._sync.add_user(username, password)
+                        if remote_ok:
+                            logger.info(f"User {username} synced to France server")
+                        else:
+                            logger.warning(f"Failed to sync user {username} to France")
+                    except Exception as e:
+                        logger.warning(f"Remote sync error for {username}: {e}")
+                
                 return True
             else:
                 logger.error(f"Failed to add user {username}: {stderr.decode()}")
@@ -77,14 +115,23 @@ class OCServService:
             return False
     
     async def delete_user(self, username: str) -> bool:
-        """حذف کاربر از OCServ"""
+        """حذف کاربر از OCServ + سرور فرانسه"""
         try:
-            # -c flag is required to specify password file path
             cmd = [self.ocpasswd, "-c", self.passwd_file, "-d", username]
             returncode, _, stderr = await self._run_command(cmd)
             
-            if returncode == 0:
-                logger.info(f"User {username} deleted successfully")
+            local_success = returncode == 0
+            
+            if local_success:
+                logger.info(f"User {username} deleted locally")
+                
+                if self._sync_enabled:
+                    try:
+                        await self._sync.delete_user(username)
+                        logger.info(f"User {username} deleted from France")
+                    except Exception as e:
+                        logger.warning(f"Remote delete error for {username}: {e}")
+                
                 return True
             else:
                 logger.error(f"Failed to delete user {username}: {stderr}")
@@ -94,26 +141,39 @@ class OCServService:
             return False
     
     async def update_password(self, username: str, new_password: str) -> bool:
-        """تغییر رمز عبور کاربر"""
-        # ابتدا حذف و سپس اضافه کردن مجدد
+        """تغییر رمز عبور کاربر + سینک"""
         await self.delete_user(username)
         return await self.add_user(username, new_password)
     
     async def lock_user(self, username: str) -> bool:
-        """قفل کردن کاربر (غیرفعال کردن)"""
+        """قفل کردن کاربر + سینک"""
         try:
             cmd = [self.ocpasswd, "-c", self.passwd_file, "-l", username]
             returncode, _, _ = await self._run_command(cmd)
+            
+            if returncode == 0 and self._sync_enabled:
+                try:
+                    await self._sync.lock_user(username)
+                except Exception as e:
+                    logger.warning(f"Remote lock error: {e}")
+            
             return returncode == 0
         except Exception as e:
             logger.error(f"Error locking user {username}: {e}")
             return False
     
     async def unlock_user(self, username: str) -> bool:
-        """باز کردن قفل کاربر (فعال کردن)"""
+        """باز کردن قفل کاربر + سینک"""
         try:
             cmd = [self.ocpasswd, "-c", self.passwd_file, "-u", username]
             returncode, _, _ = await self._run_command(cmd)
+            
+            if returncode == 0 and self._sync_enabled:
+                try:
+                    await self._sync.unlock_user(username)
+                except Exception as e:
+                    logger.warning(f"Remote unlock error: {e}")
+            
             return returncode == 0
         except Exception as e:
             logger.error(f"Error unlocking user {username}: {e}")
@@ -124,8 +184,18 @@ class OCServService:
     async def get_online_users(self) -> List[Dict[str, Any]]:
         """
         دریافت لیست کاربران آنلاین
-        پارس کردن خروجی occtl show users
+        اگر سینک فعال باشه، از سرور فرانسه میخونه
         """
+        # If sync enabled, get remote users (they connect to France)
+        if self._sync_enabled:
+            try:
+                remote_users = await self._sync.get_online_users()
+                if remote_users:
+                    return remote_users
+            except Exception as e:
+                logger.warning(f"Remote get_online_users error: {e}")
+        
+        # Fallback to local
         try:
             cmd = [self.occtl, "show", "users"]
             returncode, stdout, _ = await self._run_command(cmd)
@@ -136,7 +206,6 @@ class OCServService:
             users = []
             lines = stdout.strip().split('\n')
             
-            # Skip header line
             for line in lines[1:]:
                 if not line.strip():
                     continue
@@ -150,7 +219,7 @@ class OCServService:
                         "client_ip": parts[3],
                         "connected_at": parts[4] + " " + parts[5] if len(parts) > 5 else parts[4],
                         "user_agent": " ".join(parts[6:]) if len(parts) > 6 else "",
-                        "rx": 0,  # Will be updated by traffic stats
+                        "rx": 0,
                         "tx": 0
                     }
                     users.append(user)
@@ -161,7 +230,13 @@ class OCServService:
             return []
     
     async def disconnect_user(self, username: str) -> bool:
-        """قطع اتصال کاربر"""
+        """قطع اتصال کاربر + سینک"""
+        if self._sync_enabled:
+            try:
+                await self._sync.disconnect_user(username)
+            except Exception as e:
+                logger.warning(f"Remote disconnect error: {e}")
+        
         try:
             cmd = [self.occtl, "disconnect", "user", username]
             returncode, _, _ = await self._run_command(cmd)
@@ -183,21 +258,28 @@ class OCServService:
     # ========== آمار و وضعیت ==========
     
     async def get_status(self) -> Dict[str, Any]:
-        """دریافت وضعیت سرور"""
+        """دریافت وضعیت سرور (ترکیب لوکال و ریموت)"""
+        status = {"status": "running", "online": True}
+        
+        if self._sync_enabled:
+            try:
+                remote_status = await self._sync.get_status()
+                status["remote"] = remote_status
+                status["remote_active"] = remote_status.get("service_active", False)
+            except Exception as e:
+                status["remote"] = {"error": str(e)}
+                status["remote_active"] = False
+        
         try:
             cmd = [self.occtl, "show", "status"]
             returncode, stdout, _ = await self._run_command(cmd)
             
             if returncode != 0:
-                return {"status": "error", "online": False}
+                status["status"] = "error"
+                status["online"] = False
+                return status
             
-            status = {
-                "status": "running",
-                "online": True,
-                "raw": stdout
-            }
-            
-            # Parse status output
+            status["raw"] = stdout
             for line in stdout.split('\n'):
                 if ':' in line:
                     key, value = line.split(':', 1)
@@ -210,7 +292,15 @@ class OCServService:
             return {"status": "error", "online": False, "error": str(e)}
     
     async def get_user_traffic(self, username: str) -> Dict[str, int]:
-        """دریافت ترافیک یک کاربر خاص"""
+        """دریافت ترافیک کاربر (از فرانسه اگه سینک فعاله)"""
+        if self._sync_enabled:
+            try:
+                remote_traffic = await self._sync.get_user_traffic(username)
+                if remote_traffic and (remote_traffic.get("rx", 0) > 0 or remote_traffic.get("tx", 0) > 0):
+                    return remote_traffic
+            except Exception as e:
+                logger.warning(f"Remote traffic error: {e}")
+        
         try:
             cmd = [self.occtl, "show", "user", username]
             returncode, stdout, _ = await self._run_command(cmd)
@@ -220,25 +310,15 @@ class OCServService:
             
             rx, tx = 0, 0
             
-            # Format: "        RX: 57634326 (57.6 MB)   TX: 4155174941 (4.2 GB)"
-            # Must match line that STARTS with RX: (after whitespace), not "Average bandwidth RX:"
             for line in stdout.split('\n'):
                 line = line.strip()
-                
-                # Match line that starts with "RX:" (the main traffic line)
-                # This line has format: "RX: 12345 (12.3 KB)   TX: 67890 (67.8 KB)"
                 if line.startswith('RX:'):
-                    # Extract RX value
                     rx_match = re.search(r'^RX:\s*(\d+)', line)
                     if rx_match:
                         rx = int(rx_match.group(1))
-                    
-                    # Extract TX value from same line
                     tx_match = re.search(r'TX:\s*(\d+)', line)
                     if tx_match:
                         tx = int(tx_match.group(1))
-                    
-                    # Found the line, no need to continue
                     break
             
             logger.debug(f"Traffic for {username}: RX={rx}, TX={tx}")
@@ -251,6 +331,12 @@ class OCServService:
     
     async def reload_config(self) -> bool:
         """بارگذاری مجدد تنظیمات"""
+        if self._sync_enabled:
+            try:
+                await self._sync.reload_config()
+            except:
+                pass
+        
         try:
             cmd = [self.occtl, "reload"]
             returncode, _, _ = await self._run_command(cmd)
@@ -261,6 +347,12 @@ class OCServService:
     
     async def restart_service(self) -> bool:
         """راه‌اندازی مجدد سرویس"""
+        if self._sync_enabled:
+            try:
+                await self._sync.restart_service()
+            except:
+                pass
+        
         try:
             cmd = ["systemctl", "restart", "ocserv"]
             returncode, _, _ = await self._run_command(cmd)
@@ -306,7 +398,13 @@ class OCServService:
         return config
     
     async def update_config(self, key: str, value: str) -> bool:
-        """به‌روزرسانی یک تنظیم در فایل کانفیگ"""
+        """به‌روزرسانی تنظیمات + سینک"""
+        if self._sync_enabled:
+            try:
+                await self._sync.update_config(key, value)
+            except:
+                pass
+        
         try:
             with open(self.config_file, 'r') as f:
                 lines = f.readlines()
