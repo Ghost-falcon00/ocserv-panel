@@ -121,33 +121,75 @@ class TunnelService:
     
     async def is_gost_installed(self) -> bool:
         """بررسی نصب بودن Gost"""
-        return os.path.exists(GOST_BINARY)
+        exists = os.path.exists(GOST_BINARY)
+        logger.info(f"Gost binary check: {GOST_BINARY} exists={exists}")
+        return exists
     
     async def install_gost(self) -> bool:
-        """نصب Gost"""
+        """نصب Gost v3 با پروکسی‌های GitHub برای ایران"""
         try:
-            install_script = """
-            set -e
-            GOST_VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | grep -oP '"tag_name": "v\\K[^"]+')
-            wget -q https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-amd64-${GOST_VERSION}.gz -O /tmp/gost.gz
-            gunzip -f /tmp/gost.gz
-            mv /tmp/gost /usr/local/bin/gost
-            chmod +x /usr/local/bin/gost
-            mkdir -p /etc/gost
-            """
+            logger.info("Installing Gost v3.2.6...")
+            
+            GOST_VER = "3.2.6"
+            GOST_FILE = f"gost_{GOST_VER}_linux_amd64.tar.gz"
+            GOST_URL = f"https://github.com/go-gost/gost/releases/download/v{GOST_VER}/{GOST_FILE}"
+            
+            # لیست میرورها
+            mirrors = [
+                f"https://ghproxy.net/{GOST_URL}",
+                f"https://gh-proxy.com/{GOST_URL}",
+                f"https://ghfast.top/{GOST_URL}",
+                f"https://gh.ddlc.top/{GOST_URL}",
+                GOST_URL,
+            ]
+            
+            # تلاش دانلود از میرورها
+            download_script = "set -e\n"
+            download_script += "DOWNLOADED=false\n"
+            for url in mirrors:
+                download_script += f"""
+if [ "$DOWNLOADED" = "false" ]; then
+    if timeout 15 wget --timeout=10 --tries=1 -q "{url}" -O /tmp/gost.tar.gz 2>/dev/null; then
+        SIZE=$(stat -c%s /tmp/gost.tar.gz 2>/dev/null || echo 0)
+        if [ "$SIZE" -gt 100000 ]; then
+            DOWNLOADED=true
+            echo "Downloaded from {url.split('/')[2]}"
+        else
+            rm -f /tmp/gost.tar.gz
+        fi
+    fi
+fi
+"""
+            download_script += """
+if [ "$DOWNLOADED" = "false" ]; then
+    echo "FAILED: Could not download from any mirror" >&2
+    exit 1
+fi
+tar -xzf /tmp/gost.tar.gz -C /tmp/
+cp /tmp/gost /usr/local/bin/gost
+chmod +x /usr/local/bin/gost
+mkdir -p /etc/gost
+rm -f /tmp/gost.tar.gz
+/usr/local/bin/gost -V
+"""
             
             process = await asyncio.create_subprocess_shell(
-                install_script,
+                download_script,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            await process.communicate()
+            stdout, stderr = await process.communicate()
+            
+            stdout_str = stdout.decode().strip() if stdout else ""
+            stderr_str = stderr.decode().strip() if stderr else ""
             
             if process.returncode == 0:
                 await self._create_systemd_service()
-                logger.info("Gost installed successfully")
+                logger.info(f"Gost installed successfully: {stdout_str}")
                 return True
-            return False
+            else:
+                logger.error(f"Gost install failed (rc={process.returncode}): {stderr_str}")
+                return False
         except Exception as e:
             logger.error(f"Error installing Gost: {e}")
             return False
@@ -466,24 +508,59 @@ WantedBy=multi-user.target
     async def start(self) -> bool:
         """شروع تانل"""
         try:
+            # مرحله 1: بررسی Gost
+            logger.info("[Tunnel Start] Step 1: Checking Gost installation...")
             if not await self.is_gost_installed():
+                logger.info("[Tunnel Start] Gost not found, attempting install...")
                 success = await self.install_gost()
                 if not success:
+                    logger.error("[Tunnel Start] FAILED: Could not install Gost")
                     return False
+                logger.info("[Tunnel Start] Gost installed successfully")
             
-            # اعمال تنظیمات stealth به OCServ (اگر موجوده)
+            # مرحله 2: بررسی کانفیگ
+            logger.info("[Tunnel Start] Step 2: Checking config...")
+            if not os.path.exists(self.config_path):
+                logger.error(f"[Tunnel Start] FAILED: Config file missing: {self.config_path}")
+                return False
+            
+            with open(self.config_path, 'r') as f:
+                config_content = f.read()
+            logger.info(f"[Tunnel Start] Config loaded ({len(config_content)} bytes)")
+            
+            # مرحله 3: اعمال stealth
+            logger.info("[Tunnel Start] Step 3: Applying OCServ stealth...")
             await self.apply_ocserv_stealth()
             
+            # مرحله 4: استارت سرویس
+            logger.info("[Tunnel Start] Step 4: Starting Gost service...")
             process = await asyncio.create_subprocess_shell(
-                "systemctl enable gost && systemctl start gost",
+                "systemctl enable gost && systemctl restart gost",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            await process.communicate()
+            stdout, stderr = await process.communicate()
             
-            return process.returncode == 0
+            stderr_str = stderr.decode().strip() if stderr else ""
+            
+            if process.returncode == 0:
+                logger.info("[Tunnel Start] SUCCESS: Gost service started")
+                return True
+            else:
+                logger.error(f"[Tunnel Start] FAILED: systemctl returned {process.returncode}: {stderr_str}")
+                
+                # لاگ وضعیت سرویس
+                status_proc = await asyncio.create_subprocess_shell(
+                    "systemctl status gost --no-pager -l 2>&1 | tail -15",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                status_out, _ = await status_proc.communicate()
+                if status_out:
+                    logger.error(f"[Tunnel Start] Gost status: {status_out.decode().strip()}")
+                return False
         except Exception as e:
-            logger.error(f"Error starting tunnel: {e}")
+            logger.error(f"[Tunnel Start] EXCEPTION: {e}", exc_info=True)
             return False
     
     async def stop(self) -> bool:

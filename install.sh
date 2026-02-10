@@ -388,7 +388,7 @@ setup_ssl() {
         return
     fi
     
-    # Actually check if port 80 is available
+    # Check if port 80 is available
     PORT80_FREE=true
     if ss -tuln 2>/dev/null | grep -q ":80 " || netstat -tuln 2>/dev/null | grep -q ":80 "; then
         PORT80_FREE=false
@@ -397,14 +397,13 @@ setup_ssl() {
     fi
     
     if [[ "$PORT80_FREE" == "true" ]]; then
-        # Port 80 is free - try Let's Encrypt automatically
-        log_info "Port 80 is available. Attempting Let's Encrypt certificate..."
+        log_info "Port 80 is available. Attempting Let's Encrypt..."
         
         # Stop services that might interfere
         systemctl stop nginx 2>/dev/null || true
         systemctl stop apache2 2>/dev/null || true
         systemctl stop ocserv 2>/dev/null || true
-        
+        fuser -k 80/tcp 2>/dev/null || true
         sleep 1
         
         # Install certbot
@@ -417,29 +416,40 @@ setup_ssl() {
             CERTBOT_CMD="certbot"
         fi
         
-        # Try to get certificate
-        $CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
+        # Try to get certificate — capture output for error analysis
+        log_info "Running certbot for $DOMAIN..."
+        CERTBOT_OUTPUT=$($CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
             --register-unsafely-without-email \
             -d $DOMAIN \
-            --preferred-challenges http 2>&1 | tail -5
+            --preferred-challenges http 2>&1) || true
+        
+        echo "$CERTBOT_OUTPUT" | tail -5
         
         if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
             ln -sf /etc/letsencrypt/live/$DOMAIN/fullchain.pem /etc/ocserv/ssl/server-cert.pem
             ln -sf /etc/letsencrypt/live/$DOMAIN/privkey.pem /etc/ocserv/ssl/server-key.pem
-            log_success "Let's Encrypt certificate obtained successfully!"
+            log_success "Let's Encrypt certificate obtained!"
             
-            # Setup auto-renewal
             cat > /etc/cron.d/certbot-ocserv << 'CRONEOF'
 0 0 1 * * root certbot renew --quiet && systemctl reload ocserv
 CRONEOF
             return
         else
-            log_warning "Let's Encrypt failed. Maybe domain DNS is not pointing to this server?"
-            log_warning "Falling back to self-signed certificate..."
+            # Detect specific errors
+            if echo "$CERTBOT_OUTPUT" | grep -qi "rate limit\|too many\|duplicate"; then
+                log_warning "Let's Encrypt RATE LIMITED!"
+                log_warning "Rate limit resets in ~7 days. Using self-signed cert."
+            elif echo "$CERTBOT_OUTPUT" | grep -qi "dns\|resolve\|not point\|NXDOMAIN"; then
+                log_warning "Domain $DOMAIN DNS not pointing to this server!"
+                log_warning "Set A record: $DOMAIN → $(get_public_ip)"
+            else
+                log_warning "Let's Encrypt failed:"
+                echo "$CERTBOT_OUTPUT" | tail -3
+            fi
+            log_info "Auto-fallback to self-signed certificate..."
             create_self_signed_cert
         fi
     else
-        # Port 80 is busy - offer choices
         echo ""
         log_warning "Port 80 is busy. Options:"
         echo "  1) Free port 80 and get Let's Encrypt (recommended)"
@@ -454,7 +464,6 @@ CRONEOF
             fuser -k 80/tcp 2>/dev/null || true
             sleep 2
             
-            # Retry Let's Encrypt
             if command -v snap &> /dev/null; then
                 CERTBOT_CMD="/snap/bin/certbot"
             else
@@ -462,10 +471,12 @@ CRONEOF
                 CERTBOT_CMD="certbot"
             fi
             
-            $CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
+            CERTBOT_OUTPUT=$($CERTBOT_CMD certonly --standalone --non-interactive --agree-tos \
                 --register-unsafely-without-email \
                 -d $DOMAIN \
-                --preferred-challenges http 2>&1 | tail -5
+                --preferred-challenges http 2>&1) || true
+            
+            echo "$CERTBOT_OUTPUT" | tail -5
             
             if [[ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
                 ln -sf /etc/letsencrypt/live/$DOMAIN/fullchain.pem /etc/ocserv/ssl/server-cert.pem
@@ -477,11 +488,16 @@ CRONEOF
 CRONEOF
                 return
             else
-                log_warning "Let's Encrypt failed. Using self-signed..."
+                if echo "$CERTBOT_OUTPUT" | grep -qi "rate limit\|too many"; then
+                    log_warning "Rate limited by Let's Encrypt!"
+                else
+                    log_warning "Let's Encrypt failed."
+                fi
+                log_info "Auto-fallback to self-signed certificate..."
                 create_self_signed_cert
             fi
         else
-            log_info "Creating self-signed certificate..."
+            log_info "Using self-signed certificate..."
             create_self_signed_cert
         fi
     fi
@@ -490,16 +506,30 @@ CRONEOF
 create_self_signed_cert() {
     log_info "Generating self-signed certificate (valid for 10 years)..."
     
+    # Generate with SAN for proper browser support (stealth: use NL location)
     openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
-        -subj "/C=IR/ST=Tehran/L=Tehran/O=OCServ/CN=$DOMAIN" \
+        -subj "/C=NL/ST=NH/L=Amsterdam/O=Web Services/CN=$DOMAIN" \
+        -addext "subjectAltName=DNS:$DOMAIN,IP:$SERVER_IP" \
         -keyout /etc/ocserv/ssl/server-key.pem \
         -out /etc/ocserv/ssl/server-cert.pem \
         > /dev/null 2>&1
     
-    chmod 600 /etc/ocserv/ssl/*.pem
+    # Fallback for older openssl without -addext
+    if [ ! -f /etc/ocserv/ssl/server-cert.pem ]; then
+        openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 \
+            -subj "/C=NL/ST=NH/L=Amsterdam/O=Web Services/CN=$DOMAIN" \
+            -keyout /etc/ocserv/ssl/server-key.pem \
+            -out /etc/ocserv/ssl/server-cert.pem \
+            > /dev/null 2>&1
+    fi
     
-    log_success "Self-signed certificate created"
-    log_warning "Note: Clients will see a certificate warning (normal for self-signed)"
+    if [ -f /etc/ocserv/ssl/server-cert.pem ]; then
+        chmod 600 /etc/ocserv/ssl/*.pem
+        log_success "Self-signed certificate created for $DOMAIN"
+        log_warning "Browsers will show certificate warning (normal)"
+    else
+        log_error "Failed to create SSL certificate!"
+    fi
 }
 
 configure_ocserv() {
