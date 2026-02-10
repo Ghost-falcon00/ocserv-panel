@@ -281,7 +281,7 @@ class BlockingService:
                     await f.write(f"address=/{domain}/\n")
             
             # Reload dnsmasq if running
-            os.system("systemctl reload dnsmasq 2>/dev/null || true")
+            os.system("/usr/bin/systemctl reload dnsmasq 2>/dev/null || true")
             
             logger.info("Updated dnsmasq config")
         

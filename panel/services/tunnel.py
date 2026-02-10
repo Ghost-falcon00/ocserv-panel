@@ -220,7 +220,7 @@ WantedBy=multi-user.target
         with open(GOST_SERVICE, 'w') as f:
             f.write(service_content)
         
-        await asyncio.create_subprocess_shell("systemctl daemon-reload")
+        await asyncio.create_subprocess_shell("/usr/bin/systemctl daemon-reload")
     
     def _generate_random_path(self) -> str:
         """تولید مسیر تصادفی برای WebSocket (شبیه URL واقعی)"""
@@ -493,7 +493,7 @@ WantedBy=multi-user.target
             
             # Reload
             process = await asyncio.create_subprocess_shell(
-                "systemctl reload ocserv 2>/dev/null || systemctl restart ocserv",
+                "/usr/bin/systemctl reload ocserv 2>/dev/null || /usr/bin/systemctl restart ocserv",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -535,7 +535,7 @@ WantedBy=multi-user.target
             # مرحله 4: استارت سرویس
             logger.info("[Tunnel Start] Step 4: Starting Gost service...")
             process = await asyncio.create_subprocess_shell(
-                "systemctl enable gost && systemctl restart gost",
+                "/usr/bin/systemctl enable gost && /usr/bin/systemctl restart gost",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -551,7 +551,7 @@ WantedBy=multi-user.target
                 
                 # لاگ وضعیت سرویس
                 status_proc = await asyncio.create_subprocess_shell(
-                    "systemctl status gost --no-pager -l 2>&1 | tail -15",
+                    "/usr/bin/systemctl status gost --no-pager -l 2>&1 | tail -15",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
@@ -567,7 +567,7 @@ WantedBy=multi-user.target
         """توقف تانل"""
         try:
             process = await asyncio.create_subprocess_shell(
-                "systemctl stop gost",
+                "/usr/bin/systemctl stop gost",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -588,7 +588,7 @@ WantedBy=multi-user.target
             installed = await self.is_gost_installed()
             
             process = await asyncio.create_subprocess_shell(
-                "systemctl is-active gost",
+                "/usr/bin/systemctl is-active gost",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )

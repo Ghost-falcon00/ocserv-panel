@@ -354,7 +354,7 @@ class OCServService:
                 pass
         
         try:
-            cmd = ["systemctl", "restart", "ocserv"]
+            cmd = ["/usr/bin/systemctl", "restart", "ocserv"]
             returncode, _, _ = await self._run_command(cmd)
             return returncode == 0
         except Exception as e:
@@ -364,7 +364,7 @@ class OCServService:
     async def stop_service(self) -> bool:
         """توقف سرویس"""
         try:
-            cmd = ["systemctl", "stop", "ocserv"]
+            cmd = ["/usr/bin/systemctl", "stop", "ocserv"]
             returncode, _, _ = await self._run_command(cmd)
             return returncode == 0
         except Exception as e:
@@ -374,7 +374,7 @@ class OCServService:
     async def start_service(self) -> bool:
         """شروع سرویس"""
         try:
-            cmd = ["systemctl", "start", "ocserv"]
+            cmd = ["/usr/bin/systemctl", "start", "ocserv"]
             returncode, _, _ = await self._run_command(cmd)
             return returncode == 0
         except Exception as e:
