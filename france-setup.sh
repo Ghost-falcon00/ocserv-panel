@@ -1,13 +1,14 @@
 #!/bin/bash
 #
-# OCServ France Server Setup Script
+# OCServ France Server Setup Script v2
 # اسکریپت نصب و تنظیم سرور فرانسه (سرور خارجی)
 # شامل Remote API برای سینک با پنل ایران
 #
 # Usage: bash <(curl -sL https://raw.githubusercontent.com/Ghost-falcon00/ocserv-panel/main/france-setup.sh)
 #
 
-set -e
+# Don't exit on error — we handle errors ourselves
+set +e
 
 # Colors
 RED='\033[0;31m'
@@ -16,75 +17,158 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Print banner
+# Variables
+API_PORT=6443
+OCSERV_PORT=443
+VPN_USER=""
+VPN_PASS=""
+SERVER_IP=""
+API_TOKEN=""
+
+# ========== Utility Functions ==========
+
 print_banner() {
     echo -e "${PURPLE}"
     echo "╔═══════════════════════════════════════════════════════════╗"
     echo "║                                                           ║"
-    echo "║     OCServ France Server Setup                            ║"
+    echo "║     OCServ France Server Setup v2                         ║"
     echo "║     اسکریپت نصب سرور فرانسه (خارجی)                       ║"
-    echo "║     + Remote API for Panel Sync                           ║"
+    echo "║     + Remote API + Full Stealth Mode                      ║"
     echo "║                                                           ║"
     echo "╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
 
-# Print status messages
-info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
 success() { echo -e "${GREEN}[✓]${NC} $1"; }
 warning() { echo -e "${YELLOW}[!]${NC} $1"; }
-error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
+err()     { echo -e "${RED}[✗]${NC} $1"; }
+fatal()   { echo -e "${RED}[FATAL]${NC} $1"; exit 1; }
 
-# Generate random string
 generate_token() {
     python3 -c "import secrets; print(secrets.token_urlsafe(48))" 2>/dev/null || \
     openssl rand -base64 48 | tr -d '/+=' | head -c 48
 }
 
-# Check if running as root
+# ========== Pre-flight Checks ==========
+
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        error "This script must be run as root (sudo)"
+        fatal "This script must be run as root (sudo)"
     fi
 }
 
-# Detect OS
 detect_os() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         OS=$ID
         VERSION=$VERSION_ID
     else
-        error "Cannot detect OS"
+        fatal "Cannot detect OS"
     fi
     
     if [[ "$OS" != "ubuntu" && "$OS" != "debian" ]]; then
-        error "This script only supports Ubuntu/Debian"
+        fatal "This script only supports Ubuntu/Debian"
     fi
     
     info "Detected: $OS $VERSION"
 }
 
-# Install dependencies
-install_dependencies() {
-    info "Installing dependencies..."
-    apt-get update -qq
-    apt-get install -y -qq ocserv gnutls-bin curl wget python3 python3-pip python3-venv unzip > /dev/null 2>&1
-    success "Dependencies installed"
-}
-
-# Get server IP
 get_server_ip() {
-    SERVER_IP=$(curl -s4 ifconfig.me || curl -s4 icanhazip.com || echo "")
+    SERVER_IP=$(curl -s4 --connect-timeout 5 ifconfig.me 2>/dev/null || \
+                curl -s4 --connect-timeout 5 icanhazip.com 2>/dev/null || \
+                curl -s4 --connect-timeout 5 ip.sb 2>/dev/null || \
+                hostname -I | awk '{print $1}')
+    
     if [ -z "$SERVER_IP" ]; then
-        error "Cannot detect server IP"
+        fatal "Cannot detect server IP"
     fi
     info "Server IP: $SERVER_IP"
 }
 
-# Create SSL certificate
+# ========== Port & Process Management ==========
+
+# Kill everything on a specific port
+kill_port() {
+    local port=$1
+    local pids=$(lsof -ti:$port 2>/dev/null)
+    if [ -n "$pids" ]; then
+        warning "Port $port is in use. Killing processes: $pids"
+        kill -9 $pids 2>/dev/null || true
+        sleep 1
+    fi
+}
+
+# Stop and disable services that might conflict
+cleanup_conflicts() {
+    info "Checking for conflicting services..."
+    
+    # Stop services that might use our ports
+    for svc in nginx apache2 httpd lighttpd caddy haproxy; do
+        if systemctl is-active --quiet $svc 2>/dev/null; then
+            warning "Stopping $svc (conflicts with OCServ port)"
+            systemctl stop $svc 2>/dev/null
+            systemctl disable $svc 2>/dev/null
+        fi
+    done
+    
+    # Stop old OCServ if running
+    if systemctl is-active --quiet ocserv 2>/dev/null; then
+        info "Stopping existing OCServ..."
+        systemctl stop ocserv 2>/dev/null
+    fi
+    
+    # Stop old remote API if running
+    if systemctl is-active --quiet ocserv-remote-api 2>/dev/null; then
+        info "Stopping existing Remote API..."
+        systemctl stop ocserv-remote-api 2>/dev/null
+    fi
+    
+    # Kill anything on the OCServ port
+    kill_port $OCSERV_PORT
+    
+    # Kill anything on the API port
+    kill_port $API_PORT
+    
+    success "No conflicting services"
+}
+
+# Check if port is actually free
+check_port() {
+    local port=$1
+    local name=$2
+    if lsof -ti:$port &>/dev/null; then
+        err "Port $port is STILL in use after cleanup!"
+        lsof -i:$port 2>/dev/null
+        fatal "Cannot continue — free port $port manually"
+    fi
+    success "Port $port is free for $name"
+}
+
+# ========== Installation ==========
+
+install_dependencies() {
+    info "Installing dependencies..."
+    
+    export DEBIAN_FRONTEND=noninteractive
+    
+    apt-get update -qq 2>/dev/null
+    apt-get install -y -qq \
+        ocserv gnutls-bin curl wget lsof \
+        python3 python3-pip python3-venv \
+        unzip iptables > /dev/null 2>&1
+    
+    if ! command -v ocserv &>/dev/null; then
+        fatal "OCServ installation failed"
+    fi
+    
+    success "Dependencies installed"
+}
+
+# ========== SSL Certificate ==========
+
 create_ssl() {
     info "Creating self-signed SSL certificate..."
     
@@ -131,32 +215,43 @@ EOF
     
     rm -f /tmp/ca.tmpl /tmp/server.tmpl
     
-    success "SSL certificate created"
+    if [ -f /etc/ocserv/ssl/server-cert.pem ]; then
+        success "SSL certificate created"
+    else
+        fatal "SSL certificate creation failed"
+    fi
 }
 
-# Create OCServ configuration
+# ========== OCServ Configuration ==========
+
 create_config() {
     info "Creating OCServ configuration..."
     
-    # Get port from user
+    # Port selection
     echo ""
     echo -e "${CYAN}پورت OCServ را انتخاب کنید:${NC}"
-    echo "1) 2083 (پیشنهادی - کمتر فیلتر میشه)"
-    echo "2) 443 (استاندارد HTTPS)"
-    echo "3) Custom (خودم انتخاب میکنم)"
+    echo "1) 443  (استاندارد HTTPS - پیشنهادی)"
+    echo "2) 2083 (پورت Cloudflare - کمتر فیلتر میشه)"
+    echo "3) 8443 (HTTPS آلترنیتیو)"
+    echo "4) Custom"
     echo ""
-    read -p "انتخاب [1-3]: " port_choice
+    read -p "انتخاب [1-4]: " port_choice
     
     case $port_choice in
-        1) OCSERV_PORT=2083 ;;
-        2) OCSERV_PORT=443 ;;
-        3) read -p "پورت دلخواه: " OCSERV_PORT ;;
-        *) OCSERV_PORT=2083 ;;
+        1) OCSERV_PORT=443 ;;
+        2) OCSERV_PORT=2083 ;;
+        3) OCSERV_PORT=8443 ;;
+        4) read -p "پورت دلخواه: " OCSERV_PORT ;;
+        *) OCSERV_PORT=443 ;;
     esac
     
+    # Kill anything on the chosen port
+    kill_port $OCSERV_PORT
+    
+    # Write config
     cat > /etc/ocserv/ocserv.conf << EOF
-# OCServ Configuration - Full Stealth Mode
-# Generated by france-setup.sh
+# OCServ Configuration - Full Stealth Mode v2
+# Generated: $(date)
 # تمام امضاهای سیسکو حذف شدن - ترافیک شبیه وبسایت عادی‌ه
 
 # Authentication
@@ -180,20 +275,20 @@ server-key = /etc/ocserv/ssl/server-key.pem
 max-clients = 128
 max-same-clients = 4
 
-# Timeouts optimized for Iran
+# Timeouts for Iran tunnel
 keepalive = 32400
 dpd = 90
 mobile-dpd = 1800
 switch-to-tcp-timeout = 25
 
-# MTU optimization
+# MTU
 try-mtu-discovery = false
 mtu = 1280
 
 # TLS fingerprint مثل مرورگر عادی (نه سیسکو)
 tls-priorities = "NORMAL:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1:+VERS-TLS1.3:-RSA:-DHE-RSA:-CAMELLIA-128-CBC:-CAMELLIA-256-CBC"
 
-# Timeouts
+# Auth & Session
 auth-timeout = 240
 idle-timeout = 1200
 mobile-idle-timeout = 2400
@@ -233,7 +328,6 @@ dtls-legacy = false
 # =============================================
 # Anti-Detection & Cisco Signature Removal
 # =============================================
-# هدرهای جعلی nginx/PHP - فایروال فکر میکنه یه سایت عادیه
 custom-header = "Server: nginx/1.24.0"
 custom-header = "X-Powered-By: PHP/8.2.12"
 custom-header = "X-Content-Type-Options: nosniff"
@@ -251,14 +345,15 @@ custom-header = "X-DNS-Prefetch-Control: off"
 # فشرده‌سازی غیرفعال (anti-DPI)
 compression = false
 
-# Stats reset
+# Stats
 server-stats-reset-time = 0
 EOF
     
     success "OCServ configured on port $OCSERV_PORT (Full Stealth Mode)"
 }
 
-# Create default user
+# ========== VPN User ==========
+
 create_user() {
     info "Creating VPN user..."
     
@@ -267,33 +362,56 @@ create_user() {
     read -s -p "رمز عبور VPN: " VPN_PASS
     echo ""
     
+    if [ -z "$VPN_USER" ] || [ -z "$VPN_PASS" ]; then
+        VPN_USER="admin"
+        VPN_PASS=$(openssl rand -base64 12 | tr -d '/+=' | head -c 12)
+        warning "Using default user: $VPN_USER / $VPN_PASS"
+    fi
+    
     echo "$VPN_PASS" | ocpasswd -c /etc/ocserv/ocpasswd "$VPN_USER"
     
     success "User '$VPN_USER' created"
 }
 
-# Enable IP forwarding
+# ========== IP Forwarding ==========
+
 enable_forwarding() {
     info "Enabling IP forwarding..."
     
+    # Enable now
+    sysctl -w net.ipv4.ip_forward=1 > /dev/null 2>&1
+    
+    # Persist
     echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-ocserv.conf
     sysctl -p /etc/sysctl.d/99-ocserv.conf > /dev/null 2>&1
     
     success "IP forwarding enabled"
 }
 
-# Configure firewall
+# ========== Firewall ==========
+
 configure_firewall() {
     info "Configuring firewall..."
     
     # Get default interface
     DEFAULT_IF=$(ip route | grep default | awk '{print $5}' | head -1)
     
+    if [ -z "$DEFAULT_IF" ]; then
+        DEFAULT_IF="eth0"
+        warning "Could not detect default interface, using $DEFAULT_IF"
+    fi
+    
+    # Flush existing OCServ rules (avoid duplicates)
+    iptables -D INPUT -p tcp --dport $OCSERV_PORT -j ACCEPT 2>/dev/null || true
+    iptables -D INPUT -p tcp --dport $API_PORT -j ACCEPT 2>/dev/null || true
+    
     # Allow OCServ port
     iptables -I INPUT -p tcp --dport $OCSERV_PORT -j ACCEPT
+    success "  Opened port $OCSERV_PORT (OCServ)"
     
     # Allow Remote API port
     iptables -I INPUT -p tcp --dport $API_PORT -j ACCEPT
+    success "  Opened port $API_PORT (Remote API)"
     
     # NAT for VPN clients  
     iptables -t nat -A POSTROUTING -s 192.168.100.0/24 -o $DEFAULT_IF -j MASQUERADE
@@ -303,7 +421,7 @@ configure_firewall() {
     # MSS clamping
     iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1240
     
-    # Save rules - NONINTERACTIVE (بدون سوال - جلوی هنگ رو میگیره)
+    # Save rules — NONINTERACTIVE
     if ! command -v netfilter-persistent &> /dev/null; then
         echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
         echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
@@ -314,15 +432,13 @@ configure_firewall() {
     success "Firewall configured"
 }
 
-# Install Remote API for panel sync
+# ========== Remote API ==========
+
 install_remote_api() {
     info "Installing Remote API for panel sync..."
     
-    # Generate API token
+    # Generate token
     API_TOKEN=$(generate_token)
-    
-    # Get API port
-    API_PORT=${API_PORT:-6443}
     
     # Create directories
     mkdir -p /opt/ocserv-remote
@@ -332,42 +448,62 @@ install_remote_api() {
     echo "$API_TOKEN" > /etc/ocserv-remote/token
     chmod 600 /etc/ocserv-remote/token
     
-    # Download remote API files
+    # Download from GitHub (with mirrors)
     GITHUB_RAW="https://raw.githubusercontent.com/Ghost-falcon00/ocserv-panel/main"
     MIRROR_RAWS=(
-        "$GITHUB_RAW"
-        "https://gh-proxy.com/$GITHUB_RAW"
         "https://ghproxy.net/$GITHUB_RAW"
+        "https://gh-proxy.com/$GITHUB_RAW"
+        "https://ghfast.top/$GITHUB_RAW"
+        "$GITHUB_RAW"
     )
     
     DOWNLOADED=false
     for raw_url in "${MIRROR_RAWS[@]}"; do
-        if timeout 10 curl -sL "$raw_url/remote-api/remote_api.py" -o /opt/ocserv-remote/remote_api.py 2>/dev/null; then
-            if [[ -s /opt/ocserv-remote/remote_api.py ]]; then
+        src=$(echo "$raw_url" | cut -d'/' -f3)
+        echo -ne "  ⏳ ${CYAN}${src}${NC} ... "
+        if timeout 15 curl -sL "$raw_url/remote-api/remote_api.py" -o /opt/ocserv-remote/remote_api.py 2>/dev/null; then
+            SIZE=$(stat -c%s /opt/ocserv-remote/remote_api.py 2>/dev/null || echo 0)
+            if [ "$SIZE" -gt 1000 ]; then
+                echo -e "${GREEN}✓ (${SIZE} bytes)${NC}"
                 timeout 10 curl -sL "$raw_url/remote-api/requirements.txt" -o /opt/ocserv-remote/requirements.txt 2>/dev/null
                 DOWNLOADED=true
                 break
+            else
+                echo -e "${RED}✗ (too small)${NC}"
             fi
+        else
+            echo -e "${RED}✗${NC}"
         fi
     done
     
     if [[ "$DOWNLOADED" == "false" ]]; then
-        warning "Could not download remote API files, creating inline..."
-        # Create minimal inline version
+        warning "Could not download remote API files"
+        echo -e "  ${YELLOW}Creating minimal requirements.txt...${NC}"
         cat > /opt/ocserv-remote/requirements.txt << 'REQEOF'
-fastapi==0.104.1
-uvicorn==0.24.0
-pydantic==2.5.0
+fastapi==0.109.0
+uvicorn==0.27.0
+pydantic==2.5.3
+aiofiles==23.2.1
 REQEOF
+        warning "You need to manually copy remote_api.py later"
     fi
     
-    # Create Python venv and install deps
+    # Setup Python venv
     cd /opt/ocserv-remote
+    
+    if [ -d "venv" ]; then
+        info "  Removing old venv..."
+        rm -rf venv
+    fi
+    
     python3 -m venv venv
     source venv/bin/activate
-    pip install -q --upgrade pip
+    pip install -q --upgrade pip 2>/dev/null
     pip install -q -r requirements.txt 2>&1 | tail -3
     deactivate
+    
+    # Kill anything on API port
+    kill_port $API_PORT
     
     # Create systemd service
     cat > /etc/systemd/system/ocserv-remote-api.service << EOF
@@ -384,8 +520,7 @@ Environment=REMOTE_API_TOKEN=$API_TOKEN
 ExecStart=/opt/ocserv-remote/venv/bin/python /opt/ocserv-remote/remote_api.py
 Restart=always
 RestartSec=5
-NoNewPrivileges=true
-PrivateTmp=true
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
@@ -393,20 +528,24 @@ EOF
     
     systemctl daemon-reload
     systemctl enable ocserv-remote-api > /dev/null 2>&1
-    systemctl start ocserv-remote-api
+    systemctl restart ocserv-remote-api
     
-    sleep 2
+    sleep 3
     
     if systemctl is-active --quiet ocserv-remote-api; then
-        success "Remote API installed and running on port $API_PORT"
+        success "Remote API running on port $API_PORT"
     else
-        warning "Remote API installed but may need manual start"
+        warning "Remote API installed but failed to start. Check: journalctl -u ocserv-remote-api -n 20"
     fi
 }
 
-# Start OCServ
+# ========== Start OCServ ==========
+
 start_ocserv() {
     info "Starting OCServ..."
+    
+    # Make sure port is free
+    kill_port $OCSERV_PORT
     
     systemctl enable ocserv > /dev/null 2>&1
     systemctl restart ocserv
@@ -414,13 +553,16 @@ start_ocserv() {
     sleep 2
     
     if systemctl is-active --quiet ocserv; then
-        success "OCServ is running"
+        success "OCServ is running on port $OCSERV_PORT"
     else
-        error "Failed to start OCServ"
+        err "OCServ failed to start!"
+        echo -e "  ${YELLOW}Check logs: journalctl -u ocserv -n 20 --no-pager${NC}"
+        journalctl -u ocserv -n 10 --no-pager 2>/dev/null
     fi
 }
 
-# Print summary
+# ========== Summary ==========
+
 print_summary() {
     echo ""
     echo -e "${GREEN}╔═══════════════════════════════════════════════════════════╗${NC}"
@@ -438,6 +580,29 @@ print_summary() {
     echo ""
     echo -e "${RED}⚠️  توکن API رو یادداشت کن! بدون این، پنل ایران نمیتونه سینک بشه${NC}"
     echo ""
+    echo -e "${CYAN}═══ وضعیت سرویس‌ها ═══${NC}"
+    
+    # Check all services
+    for svc in ocserv ocserv-remote-api; do
+        if systemctl is-active --quiet $svc 2>/dev/null; then
+            echo -e "  ${GREEN}●${NC} $svc: ${GREEN}running${NC}"
+        else
+            echo -e "  ${RED}●${NC} $svc: ${RED}stopped${NC}"
+        fi
+    done
+    
+    # Check ports
+    echo ""
+    echo -e "${CYAN}═══ وضعیت پورت‌ها ═══${NC}"
+    for port in $OCSERV_PORT $API_PORT; do
+        if lsof -ti:$port &>/dev/null; then
+            echo -e "  ${GREEN}●${NC} Port $port: ${GREEN}listening${NC}"
+        else
+            echo -e "  ${RED}●${NC} Port $port: ${RED}not listening${NC}"
+        fi
+    done
+    
+    echo ""
     echo -e "${CYAN}═══ مرحله بعدی ═══${NC}"
     echo -e "  1. وارد پنل ایران شو"
     echo -e "  2. برو به بخش ${YELLOW}'تانل'${NC}"
@@ -450,7 +615,7 @@ print_summary() {
     echo ""
     echo -e "${PURPLE}═══════════════════════════════════════════════════════════${NC}"
     
-    # Save info to file
+    # Save info
     cat > /root/ocserv-info.txt << EOF
 OCServ France Server Info
 =========================
@@ -460,27 +625,40 @@ VPN User:       $VPN_USER
 API Port:       $API_PORT
 API Token:      $API_TOKEN
 =========================
+Generated:      $(date)
 EOF
     echo -e "${CYAN}اطلاعات در فایل /root/ocserv-info.txt ذخیره شد${NC}"
 }
 
-# Main installation
+# ========== Main ==========
+
 main() {
     print_banner
     check_root
     detect_os
     get_server_ip
+    
+    # Phase 1: Cleanup & Deps
     install_dependencies
+    cleanup_conflicts
+    
+    # Phase 2: SSL & Config
     create_ssl
     create_config
     create_user
+    
+    # Phase 3: Network
     enable_forwarding
-    API_PORT=6443
-    install_remote_api
     configure_firewall
+    
+    # Phase 4: Services
+    install_remote_api
+    
+    # Phase 5: Start
     start_ocserv
+    
+    # Done
     print_summary
 }
 
-# Run main
 main

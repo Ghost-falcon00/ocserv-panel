@@ -4,14 +4,15 @@ Logging Service
 """
 
 import os
+import sys
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from pathlib import Path
 from config import settings
 
-# Log directory
-LOG_DIR = Path(settings.PANEL_PATH) / "panel" / "logs"
+# Log directory - use base dir, not PANEL_PATH (which is URL path)
+LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Max log file size: 10MB, keep 3 backup files
@@ -22,7 +23,7 @@ BACKUP_COUNT = 3
 def setup_logging():
     """تنظیم لاگ‌گیری برای کل سیستم"""
     
-    # Panel log
+    # === File Handler (panel.log) ===
     panel_handler = RotatingFileHandler(
         LOG_DIR / "panel.log",
         maxBytes=MAX_BYTES,
@@ -32,6 +33,13 @@ def setup_logging():
     panel_handler.setFormatter(logging.Formatter(
         "[%(asctime)s] %(levelname)s - %(name)s - %(message)s"
     ))
+    
+    # === Stderr Handler (goes to journald) ===
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setFormatter(logging.Formatter(
+        "%(levelname)s - %(name)s - %(message)s"
+    ))
+    stderr_handler.setLevel(logging.INFO)
     
     # Traffic log
     traffic_handler = RotatingFileHandler(
@@ -55,10 +63,11 @@ def setup_logging():
         "[%(asctime)s] %(message)s"
     ))
     
-    # Configure root logger
+    # Configure root logger — BOTH file and stderr
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(panel_handler)
+    root_logger.addHandler(stderr_handler)
     
     # Configure specific loggers
     logging.getLogger("services.traffic").addHandler(traffic_handler)
@@ -69,6 +78,7 @@ def setup_logging():
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
     
     return panel_handler
 
