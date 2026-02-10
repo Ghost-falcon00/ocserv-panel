@@ -292,113 +292,61 @@ WantedBy=multi-user.target
         remote_ip: str,
         remote_port: int = 2083,
         local_port: int = 443,
-        protocol: str = "h2",
+        protocol: str = "tcp",
         sni: str = "www.google.com",
         obfuscation: str = "tls",
         mux: bool = True,
         padding: bool = True
     ) -> bool:
         """
-        به‌روزرسانی تنظیمات تانل با قابلیت‌های ضد شناسایی
+        به‌روزرسانی تنظیمات تانل
+        
+        TCP port forwarding: ترافیک AnyConnect مستقیم فوروارد میشه
+        کلاینت → ایران:443 (Gost TCP) → فرانسه:443 (OCServ)
         
         Args:
             remote_ip: IP سرور فرانسه
-            remote_port: پورت OCServ
-            local_port: پورت ورودی (443 پیشنهادی)
-            protocol: پروتکل اتصال (h2/wss/tls)
-            sni: SNI برای masquerading
-            obfuscation: نوع obfuscation
-            mux: فعال‌سازی multiplexing
-            padding: فعال‌سازی padding تصادفی
+            remote_port: پورت OCServ روی فرانسه
+            local_port: پورت ورودی روی ایران (443 پیشنهادی)
+            protocol: unused (kept for API compat)
+            sni: unused
+            obfuscation: unused
+            mux: unused
+            padding: unused
         """
         try:
-            # تعیین نوع listener بر اساس پروتکل
-            listener_type = "tls"
-            if protocol == "h2":
-                listener_type = "h2"
-            elif protocol in ["wss", "ws"]:
-                listener_type = "wss"
-            
-            # ساختار کانفیگ Gost v3 با anti-detection
+            # TCP port forwarding ساده - ترافیک شفاف فوروارد میشه
+            # AnyConnect مستقیم با OCServ فرانسه حرف میزنه
             gost_config = {
                 "Log": {
-                    "Level": "warn"
+                    "Level": "info"
                 },
                 "Services": [
                     {
-                        "Name": "stealth-tunnel",
+                        "Name": "vpn-tunnel",
                         "Addr": f":{local_port}",
                         "Handler": {
-                            "Type": "relay",
-                            "Metadata": {
-                                "mux": mux,
-                                "mux.version": 2,
-                            }
+                            "Type": "tcp"
                         },
                         "Listener": {
-                            "Type": listener_type,
-                            "Addr": f":{local_port}",
-                            "TLS": {
-                                "ServerName": sni,
-                                "MinVersion": "TLS1.2",
-                                "MaxVersion": "TLS1.3",
-                                "CipherSuites": [
-                                    "TLS_AES_128_GCM_SHA256",
-                                    "TLS_AES_256_GCM_SHA384",
-                                    "TLS_CHACHA20_POLY1305_SHA256",
-                                    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
-                                    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-                                ],
-                                "ALPN": ["h2", "http/1.1"],
-                            },
-                            "Metadata": {
-                                # Fake HTTP headers
-                                "header": {
-                                    "Server": ["nginx/1.24.0"],
-                                    "X-Powered-By": ["PHP/8.2.0"],
-                                    "X-Content-Type-Options": ["nosniff"],
-                                    "Cache-Control": ["no-cache, no-store"],
-                                }
-                            }
+                            "Type": "tcp"
                         },
                         "Forwarder": {
                             "Nodes": [
                                 {
-                                    "Name": "france-exit",
-                                    "Addr": f"{remote_ip}:{remote_port}",
-                                    "Connector": {
-                                        "Type": "relay",
-                                        "Metadata": {
-                                            "mux": mux
-                                        }
-                                    }
+                                    "Name": "france-ocserv",
+                                    "Addr": f"{remote_ip}:{remote_port}"
                                 }
                             ]
                         }
                     }
-                ],
-                # اضافه کردن limiter برای traffic shaping
-                "Limiters": [
-                    {
-                        "Name": "traffic-shaper",
-                        "Limits": ["$", "100MB", "1GB"]
-                    }
                 ]
             }
-            
-            # اگر padding فعاله
-            if padding:
-                gost_config["Services"][0]["Handler"]["Metadata"]["padding"] = True
-                gost_config["Services"][0]["Handler"]["Metadata"]["padding.max"] = 255
-            
-            # WebSocket path برای obfuscation بیشتر
-            if protocol in ["wss", "ws"]:
-                gost_config["Services"][0]["Listener"]["Metadata"]["path"] = self._generate_random_path()
             
             with open(self.config_path, 'w') as f:
                 json.dump(gost_config, f, indent=2)
             
-            logger.info(f"Stealth tunnel config updated: {remote_ip}:{remote_port} (protocol={protocol}, mux={mux})")
+            logger.info(f"Tunnel config updated: TCP forward :{local_port} → {remote_ip}:{remote_port}")
             return True
         except Exception as e:
             logger.error(f"Error updating tunnel config: {e}")
