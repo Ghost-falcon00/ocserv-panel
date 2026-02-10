@@ -3,13 +3,26 @@ Tunnel API - Advanced Anti-Detection + Remote Sync
 API مدیریت تانل پیشرفته با قابلیت‌های ضد شناسایی و سینک از راه دور
 """
 
+import logging
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from models.admin import Admin
 from api.auth import get_current_admin
 from services.tunnel import tunnel_service
-from services.remote_sync import remote_sync
+
+logger = logging.getLogger(__name__)
+
+# Safe import - اگه remote_sync نبود تانل خراب نشه
+try:
+    from services.remote_sync import remote_sync
+    logger.info("Remote sync module loaded successfully")
+except ImportError as e:
+    logger.warning(f"Remote sync module not available: {e}")
+    remote_sync = None
+except Exception as e:
+    logger.error(f"Error loading remote sync: {e}")
+    remote_sync = None
 
 router = APIRouter(prefix="/api/tunnel", tags=["Tunnel"])
 
@@ -135,24 +148,40 @@ async def start_tunnel(
     - اعمال تنظیمات stealth به OCServ
     - فعال‌سازی TLS fingerprint mimicry
     """
+    logger.info("POST /start called")
+    
     config = await tunnel_service.get_config()
+    logger.info(f"Tunnel config: remote_ip={config.get('remote_ip')}, protocol={config.get('protocol')}")
+    
     if not config.get("remote_ip"):
+        logger.warning("Start tunnel failed: no remote_ip configured")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="لطفاً ابتدا IP سرور فرانسه را تنظیم کنید"
         )
     
-    success = await tunnel_service.start()
-    
-    if success:
-        return TunnelResponse(
-            success=True,
-            message="تانل امن با قابلیت‌های ضد شناسایی شروع شد"
-        )
-    else:
+    try:
+        success = await tunnel_service.start()
+        logger.info(f"Tunnel start result: {success}")
+        
+        if success:
+            return TunnelResponse(
+                success=True,
+                message="تانل امن با قابلیت‌های ضد شناسایی شروع شد"
+            )
+        else:
+            logger.error("Tunnel start returned False")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="خطا در شروع تانل - لاگ سرور رو چک کنید: journalctl -u ocserv-panel -n 50"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Tunnel start exception: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="خطا در شروع تانل"
+            detail=f"خطا در شروع تانل: {str(e)}"
         )
 
 
@@ -295,6 +324,16 @@ async def get_sync_status(
     current_admin: Admin = Depends(get_current_admin)
 ):
     """دریافت وضعیت سینک با سرور فرانسه"""
+    logger.info("GET /sync/status called")
+    
+    if remote_sync is None:
+        logger.error("remote_sync module is not loaded!")
+        return SyncStatus(
+            enabled=False,
+            connected=False,
+            message="ماژول remote_sync نصب نشده. پنل رو آپدیت کنید"
+        )
+    
     config = remote_sync.config
     
     connected = False
@@ -302,10 +341,13 @@ async def get_sync_status(
     
     if remote_sync.is_enabled:
         try:
+            logger.info(f"Testing health to {config.get('remote_ip')}:{config.get('remote_api_port')}")
             connected = await remote_sync.check_health()
             message = "متصل به سرور فرانسه ✓" if connected else "ارتباط برقرار نیست ✗"
+            logger.info(f"Health check result: connected={connected}")
         except Exception as e:
             message = f"خطا: {str(e)}"
+            logger.error(f"Health check error: {e}")
     
     return SyncStatus(
         enabled=remote_sync.is_enabled,
@@ -329,6 +371,15 @@ async def update_sync_config(
     - پورت Remote API (پیش‌فرض: 6443)
     - توکن API (از خروجی france-setup.sh)
     """
+    logger.info(f"PUT /sync/config called: ip={config.remote_ip}, port={config.remote_api_port}")
+    
+    if remote_sync is None:
+        logger.error("remote_sync module is not loaded!")
+        return TunnelResponse(
+            success=False,
+            message="ماژول remote_sync نصب نشده. فایل panel/services/remote_sync.py رو چک کنید"
+        )
+    
     sync_data = {
         "enabled": config.enabled,
         "remote_ip": config.remote_ip,
@@ -337,21 +388,25 @@ async def update_sync_config(
     }
     
     remote_sync.save_config(sync_data)
+    logger.info("Sync config saved")
     
     # Test connection
     try:
         connected = await remote_sync.check_health()
         if connected:
+            logger.info("Sync connection test: SUCCESS")
             return TunnelResponse(
                 success=True,
                 message="سینک با سرور فرانسه تنظیم و متصل شد ✓"
             )
         else:
+            logger.warning("Sync connection test: FAILED (not connected)")
             return TunnelResponse(
                 success=True,
                 message="تنظیمات ذخیره شد ولی ارتباط برقرار نشد. IP/پورت/توکن رو چک کنید"
             )
     except Exception as e:
+        logger.error(f"Sync connection test error: {e}")
         return TunnelResponse(
             success=True,
             message=f"تنظیمات ذخیره شد ولی خطا: {str(e)}"
@@ -363,6 +418,15 @@ async def test_sync_connection(
     current_admin: Admin = Depends(get_current_admin)
 ):
     """تست ارتباط سینک با سرور فرانسه"""
+    logger.info("POST /sync/test called")
+    
+    if remote_sync is None:
+        logger.error("remote_sync module is not loaded!")
+        return TunnelResponse(
+            success=False,
+            message="ماژول remote_sync نصب نشده. پنل رو آپدیت کنید"
+        )
+    
     if not remote_sync.is_enabled:
         return TunnelResponse(
             success=False,
@@ -370,21 +434,26 @@ async def test_sync_connection(
         )
     
     try:
+        logger.info(f"Testing connection to {remote_sync.base_url}")
         connected = await remote_sync.check_health()
         if connected:
             # Get remote status too
             status_data = await remote_sync.get_status()
+            logger.info(f"Sync test SUCCESS: {status_data}")
             return TunnelResponse(
                 success=True,
                 message=f"ارتباط با سرور فرانسه برقراره ✓ - سرویس OCServ: {'فعال' if status_data.get('service_active') else 'غیرفعال'}"
             )
         else:
+            logger.warning("Sync test FAILED: health check returned false")
             return TunnelResponse(
                 success=False,
                 message="ارتباط برقرار نشد. IP/پورت/توکن رو بررسی کنید"
             )
     except Exception as e:
+        logger.error(f"Sync test error: {e}", exc_info=True)
         return TunnelResponse(
             success=False,
             message=f"خطا در اتصال: {str(e)}"
         )
+
