@@ -388,10 +388,6 @@ WantedBy=multi-user.target
                         "Accept-Encoding": ["gzip, deflate, br"],
                         "Cache-Control": ["no-cache"],
                         "Pragma": ["no-cache"],
-                        "Sec-WebSocket-Version": ["13"],
-                        "Sec-WebSocket-Extensions": ["permessage-deflate; client_max_window_bits"],
-                        "Upgrade": ["websocket"],
-                        "Connection": ["Upgrade"],
                     }
                 }
             }
