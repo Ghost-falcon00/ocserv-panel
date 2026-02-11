@@ -245,9 +245,9 @@ WantedBy=multi-user.target
         default_config = {
             "enabled": False,
             "remote_ip": "",
-            "remote_port": 2083,
+            "remote_port": 443,
             "local_port": 443,
-            "protocol": "h2",  # HTTP/2 by default
+            "protocol": "wss",  # WebSocket Secure by default
             "sni": "www.google.com",
             "obfuscation": "tls",
             "mux": True,  # Multiplexing enabled
@@ -261,26 +261,38 @@ WantedBy=multi-user.target
                 
                 if gost_config.get("Services"):
                     service = gost_config["Services"][0]
-                    listener = service.get("Listener", {})
+                    addr_str = service.get("Addr", ":443")
                     forwarder = service.get("Forwarder", {})
                     
                     default_config["enabled"] = True
-                    default_config["local_port"] = int(listener.get("Addr", ":443").split(":")[-1])
+                    default_config["local_port"] = int(addr_str.split(":")[-1])
                     
+                    # Forwarder target = 127.0.0.1:PORT (OCServ port)
                     if forwarder.get("Nodes"):
                         node = forwarder["Nodes"][0]
                         addr = node.get("Addr", "")
                         if ":" in addr:
-                            default_config["remote_ip"], port = addr.rsplit(":", 1)
+                            _, port = addr.rsplit(":", 1)
                             default_config["remote_port"] = int(port)
                     
-                    tls_config = listener.get("TLS", {})
-                    default_config["sni"] = tls_config.get("ServerName", "www.google.com")
-                    
-                    # Check for mux
-                    handler = service.get("Handler", {})
-                    if handler.get("Metadata", {}).get("mux"):
-                        default_config["mux"] = True
+                    # Chain-based config: read from chains
+                    chains = gost_config.get("Chains", [])
+                    if chains:
+                        hops = chains[0].get("Hops", [])
+                        if hops:
+                            nodes = hops[0].get("Nodes", [])
+                            if nodes:
+                                chain_node = nodes[0]
+                                chain_addr = chain_node.get("Addr", "")
+                                if ":" in chain_addr:
+                                    default_config["remote_ip"] = chain_addr.rsplit(":", 1)[0]
+                                dialer = chain_node.get("Dialer", {})
+                                default_config["protocol"] = dialer.get("Type", "wss")
+                                tls_cfg = dialer.get("TLS", {})
+                                default_config["sni"] = tls_cfg.get("ServerName", "www.google.com")
+                                conn_meta = chain_node.get("Connector", {}).get("Metadata", {})
+                                default_config["mux"] = conn_meta.get("mux", True)
+                                default_config["padding"] = conn_meta.get("padding", True)
                     
             except Exception as e:
                 logger.error(f"Error reading Gost config: {e}")
@@ -299,47 +311,110 @@ WantedBy=multi-user.target
         padding: bool = True
     ) -> bool:
         """
-        به‌روزرسانی تنظیمات تانل با قابلیت‌های ضد شناسایی
+        به‌روزرسانی تنظیمات تانل — حداکثر ضد شناسایی + حداکثر سرعت
         
         معماری:
-        📱 AnyConnect → Iran:443 (TCP) → [WSS Encrypted] → France:2083 (Gost Relay) → France:443 (OCServ) → 🌍
+        AnyConnect -> Iran:443 (TCP) -> [WSS+TLS1.3+SNI+MUX+Padding] -> France:2083 (Gost Relay) -> France:443 (OCServ)
         
-        DPI فقط ترافیک WebSocket HTTPS عادی بین ایران و فرانسه میبینه
-        
-        Args:
-            remote_ip: IP سرور فرانسه
-            remote_port: پورت OCServ روی فرانسه (مقصد نهایی)
-            local_port: پورت ورودی روی ایران (443 پیشنهادی)
-            protocol: پروتکل obfuscation (wss/h2/tls)
-            sni: SNI برای masquerading
-            mux: فعال‌سازی multiplexing
+        لایه‌های مخفی‌کاری:
+        1. SNI Spoofing — ترافیک مثل اتصال به Google/Cloudflare
+        2. TLS 1.3 — cipher suite مطابق Chrome 120
+        3. ALPN — مثل مرورگر: h2 + http/1.1
+        4. WebSocket — شبیه API call عادی CDN
+        5. Multiplexing v2 — یه اتصال TLS برای همه، پینگ پایین
+        6. Random Padding — اندازه پکت‌ها تصادفی، DPI ناتوان
+        7. HTTP Headers — هدرهای کامل Chrome 120
+        8. Keep-Alive — اتصال زنده، reconnect سریع
         """
         try:
-            # پورت Gost relay روی فرانسه (همیشه 2083)
             relay_port = 2083
             
-            # انتخاب نوع dialer
             dialer_type = "wss"
             if protocol == "h2":
                 dialer_type = "h2"
             elif protocol == "tls":
                 dialer_type = "tls"
             
-            # کانفیگ Gost v3 با chain — ضد شناسایی
+            ws_path = self._generate_random_path()
+            
+            # ===== Connector: relay + mux + padding =====
+            connector_meta = {}
+            if mux:
+                connector_meta["mux"] = True
+                connector_meta["mux.version"] = 2
+                connector_meta["mux.keepAliveDisabled"] = False
+                connector_meta["mux.keepAliveInterval"] = "15s"
+                connector_meta["mux.keepAliveTimeout"] = "30s"
+                connector_meta["mux.maxFrameSize"] = 32768
+                connector_meta["mux.maxReceiveBuffer"] = 4194304
+                connector_meta["mux.maxStreamBuffer"] = 65536
+            if padding:
+                connector_meta["padding"] = True
+                connector_meta["padding.max"] = 255
+            
+            # ===== Dialer: TLS fingerprint Chrome 120 =====
+            dialer_config = {
+                "Type": dialer_type,
+                "TLS": {
+                    "ServerName": sni,
+                    "Secure": False,
+                    "MinVersion": "VersionTLS12",
+                    "MaxVersion": "VersionTLS13",
+                    "CipherSuites": [
+                        "TLS_AES_128_GCM_SHA256",
+                        "TLS_AES_256_GCM_SHA384",
+                        "TLS_CHACHA20_POLY1305_SHA256",
+                        "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+                        "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+                        "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+                        "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+                        "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+                        "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+                    ],
+                    "ALPN": ["h2", "http/1.1"],
+                },
+                "Metadata": {
+                    "path": ws_path,
+                    "keepAlive": True,
+                    "keepAlivePeriod": "15s",
+                    "handshakeTimeout": "10s",
+                    "header": {
+                        "Host": [sni],
+                        "User-Agent": [
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        ],
+                        "Accept": ["text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"],
+                        "Accept-Language": ["en-US,en;q=0.9"],
+                        "Accept-Encoding": ["gzip, deflate, br"],
+                        "Cache-Control": ["no-cache"],
+                        "Pragma": ["no-cache"],
+                        "Sec-WebSocket-Version": ["13"],
+                        "Sec-WebSocket-Extensions": ["permessage-deflate; client_max_window_bits"],
+                        "Upgrade": ["websocket"],
+                        "Connection": ["Upgrade"],
+                    }
+                }
+            }
+            
+            # ===== کانفیگ نهایی =====
             gost_config = {
                 "Log": {
                     "Level": "info"
                 },
                 "Services": [
                     {
-                        "Name": "vpn-tunnel",
+                        "Name": "stealth-vpn-tunnel",
                         "Addr": f":{local_port}",
                         "Handler": {
                             "Type": "tcp",
                             "Chain": "stealth-chain"
                         },
                         "Listener": {
-                            "Type": "tcp"
+                            "Type": "tcp",
+                            "Metadata": {
+                                "keepAlive": True,
+                                "keepAlivePeriod": "30s"
+                            }
                         },
                         "Forwarder": {
                             "Nodes": [
@@ -362,22 +437,10 @@ WantedBy=multi-user.target
                                         "Name": "france-relay",
                                         "Addr": f"{remote_ip}:{relay_port}",
                                         "Connector": {
-                                            "Type": "relay"
+                                            "Type": "relay",
+                                            "Metadata": connector_meta
                                         },
-                                        "Dialer": {
-                                            "Type": dialer_type,
-                                            "TLS": {
-                                                "ServerName": sni,
-                                                "Secure": False
-                                            },
-                                            "Metadata": {
-                                                "path": "/ws/api/v1",
-                                                "header": {
-                                                    "User-Agent": ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"],
-                                                    "Accept-Language": ["en-US,en;q=0.9"]
-                                                }
-                                            }
-                                        }
+                                        "Dialer": dialer_config
                                     }
                                 ]
                             }
@@ -389,11 +452,15 @@ WantedBy=multi-user.target
             with open(self.config_path, 'w') as f:
                 json.dump(gost_config, f, indent=2)
             
-            logger.info(f"Stealth tunnel config: :{local_port} → relay+{dialer_type}://{remote_ip}:{relay_port} → 127.0.0.1:{remote_port}")
+            logger.info(
+                f"Stealth tunnel: :{local_port} -> relay+{dialer_type}://{remote_ip}:{relay_port} -> 127.0.0.1:{remote_port} "
+                f"(sni={sni}, mux={mux}, padding={padding}, path={ws_path})"
+            )
             return True
         except Exception as e:
             logger.error(f"Error updating tunnel config: {e}")
             return False
+    
     
     async def apply_ocserv_stealth(self) -> bool:
         """

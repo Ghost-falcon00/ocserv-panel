@@ -605,23 +605,55 @@ install_gost_relay() {
   },
   "Services": [
     {
-      "Name": "relay-server",
+      "Name": "stealth-relay-server",
       "Addr": ":${GOST_PORT}",
       "Handler": {
-        "Type": "relay"
+        "Type": "relay",
+        "Metadata": {
+          "mux": true,
+          "mux.version": 2,
+          "mux.keepAliveDisabled": false,
+          "mux.keepAliveInterval": "15s",
+          "mux.keepAliveTimeout": "30s",
+          "mux.maxFrameSize": 32768,
+          "mux.maxReceiveBuffer": 4194304,
+          "mux.maxStreamBuffer": 65536,
+          "padding": true,
+          "padding.max": 255
+        }
       },
       "Listener": {
         "Type": "wss",
         "TLS": {
           "CertFile": "/etc/ocserv/ssl/server-cert.pem",
-          "KeyFile": "/etc/ocserv/ssl/server-key.pem"
+          "KeyFile": "/etc/ocserv/ssl/server-key.pem",
+          "MinVersion": "VersionTLS12",
+          "MaxVersion": "VersionTLS13",
+          "CipherSuites": [
+            "TLS_AES_128_GCM_SHA256",
+            "TLS_AES_256_GCM_SHA384",
+            "TLS_CHACHA20_POLY1305_SHA256",
+            "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+            "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+            "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+            "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256"
+          ],
+          "ALPN": ["h2", "http/1.1"]
         },
         "Metadata": {
+          "path": "/api/v1/stream,/ws/connect,/socket.io/?EIO=4,/graphql/subscriptions,/cdn-cgi/trace,/ajax/libs/update,/_next/webpack-hmr,/signalr/connect",
+          "keepAlive": true,
+          "keepAlivePeriod": "30s",
           "header": {
             "Server": ["nginx/1.24.0"],
-            "X-Powered-By": ["PHP/8.2.12"]
-          },
-          "path": "/ws/api/v1"
+            "X-Powered-By": ["PHP/8.2.12"],
+            "X-Content-Type-Options": ["nosniff"],
+            "X-Frame-Options": ["SAMEORIGIN"],
+            "Strict-Transport-Security": ["max-age=31536000; includeSubDomains"],
+            "Content-Security-Policy": ["default-src 'self' https:"]
+          }
         }
       }
     }
