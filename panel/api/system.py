@@ -42,7 +42,7 @@ def get_local_commit_hash() -> str:
             panel_dir = os.getcwd()
             
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "-c", "safe.directory=*", "rev-parse", "HEAD"],
             cwd=panel_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
