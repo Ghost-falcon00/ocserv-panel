@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/ocserv-panel/venv/bin/python3
 import os
 import sys
 import asyncio
@@ -17,4 +17,7 @@ async def main():
     await FirewallService.remove_user_rules(vpn_ip)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception:
+        pass

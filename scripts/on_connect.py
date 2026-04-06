@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/ocserv-panel/venv/bin/python3
 import os
 import sys
 import asyncio
@@ -49,4 +49,7 @@ async def main():
         logging.info("Firewall rules applied.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logging.error(f"Fatal error in on_connect hook: {e}")
