@@ -78,22 +78,28 @@ class DomainScanner:
     @classmethod
     async def scan_group(cls, group: UserGroup):
         """Actively scans IPs for a single group, called upon group update."""
-        explicit_blocks = group.blocked_domains or []
-        if not explicit_blocks:
-            return
-            
-        target_ips = set()
-        for root_domain in explicit_blocks:
-            clean_domain = root_domain.strip().replace("www.", "")
-            if not clean_domain: continue
-            
-            for sub in COMMON_SUBDOMAINS:
-                target = f"{sub}.{clean_domain}" if sub else clean_domain
-                target_ips.update(await cls.resolve_domain(target))
+        try:
+            explicit_blocks = group.blocked_domains or []
+            if not explicit_blocks:
+                logger.info(f"DomainScanner: No explicit blocks for group {group.name}")
+                return
                 
-        if target_ips:
-            await cls.sync_group_ipset(group.id, target_ips)
-            logger.info(f"DomainScanner: Sync'd {len(target_ips)} IPs for group {group.name} instantly.")
+            target_ips = set()
+            for root_domain in explicit_blocks:
+                clean_domain = root_domain.strip().replace("www.", "")
+                if not clean_domain: continue
+                
+                for sub in COMMON_SUBDOMAINS:
+                    target = f"{sub}.{clean_domain}" if sub else clean_domain
+                    target_ips.update(await cls.resolve_domain(target))
+                    
+            if target_ips:
+                await cls.sync_group_ipset(group.id, target_ips)
+                logger.info(f"DomainScanner: Sync'd {len(target_ips)} IPs for group {group.name} instantly.")
+            else:
+                logger.warning(f"DomainScanner: Could not resolve ANY IPs for group {group.name} domains.")
+        except Exception as e:
+            logger.error(f"DomainScanner: ERROR in scan_group for {group.name}: {e}", exc_info=True)
 
     @classmethod
     async def sync_group_ipset(cls, group_id: int, ips: Set[str]):
