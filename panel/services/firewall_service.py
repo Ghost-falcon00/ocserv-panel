@@ -159,6 +159,9 @@ class FirewallService:
             # Block HTTPS (TCP 443) -> Kills SNI
             subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "443", 
                             "-m", "string", "--string", domain, "--algo", "bm", "-j", "DROP"])
+            # Block HTTP3/QUIC (UDP 443) -> Kills UDP bypass for instagram/youtube
+            subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", 
+                            "-m", "string", "--string", domain, "--algo", "bm", "-j", "DROP"])
             # Block HTTP (TCP 80)
             subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "80", 
                             "-m", "string", "--string", domain, "--algo", "bm", "-j", "DROP"])
