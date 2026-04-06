@@ -45,6 +45,42 @@
         </div>
     </div>
 
+    <!-- System Update -->
+    <div class="card">
+        <div class="card-header">
+            <h3>بروزرسانی سیستم</h3>
+        </div>
+        <div class="card-body">
+            <div class="update-section" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="update-status" id="update-status-container">
+                    <p style="color: var(--text-muted);">ورژن فعلی: <span id="current-version-hash">در حال بررسی...</span></p>
+                </div>
+                <button class="btn btn-primary" onclick="checkUpdate()" id="check-update-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                    </svg>
+                    بررسی آپدیت
+                </button>
+            </div>
+            
+            <div id="update-details" style="display: none; margin-top: 1rem; padding: 1rem; background: var(--bg-hover); border-radius: 8px; border: 1px solid var(--border-color);">
+                <h4 style="margin-bottom: 0.5rem; color: var(--primary-color);">آپدیت جدید در دسترس است!</h4>
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>تغییرات نسخه‌ی جدید:</strong> <span id="update-message"></span></p>
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">تاریخ: <span id="update-date" dir="ltr"></span></p>
+                
+                <button class="btn btn-success" onclick="performUpdate()" id="perform-update-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    شروع نصب و ریستارت پنل
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Categories -->
     <div class="settings-tabs">
         <button class="tab-btn active" data-category="network">شبکه</button>
@@ -266,6 +302,74 @@
     function setTheme(theme) {
         localStorage.setItem('theme', theme);
         applyTheme(theme);
+    }
+
+    async function checkUpdate() {
+        const btn = document.getElementById('check-update-btn');
+        btn.classList.add('loading');
+        
+        try {
+            const data = await apiGet('/api/system/update/check');
+            
+            document.getElementById('current-version-hash').textContent = data.local_hash;
+            
+            if (data.update_available) {
+                document.getElementById('update-details').style.display = 'block';
+                document.getElementById('update-message').textContent = data.message || 'بدون توضیحات';
+                document.getElementById('update-date').textContent = data.date ? new Date(data.date).toLocaleString('fa-IR') : 'نامشخص';
+                showToast('نسخه جدید یافت شد!', 'success');
+            } else {
+                document.getElementById('update-details').style.display = 'none';
+                showToast('شما از آخرین نسخه استفاده می‌کنید', 'info');
+            }
+        } catch (error) {
+            showToast('خطا در بررسی آپدیت', 'error');
+        } finally {
+            btn.classList.remove('loading');
+        }
+    }
+
+    async function performUpdate() {
+        if (!confirm('آیا مطمئن هستید؟ در طول آپدیت سرور برای چند ثانیه قطع شده و سپس مجددا متصل خواهد شد.')) return;
+        
+        const btn = document.getElementById('perform-update-btn');
+        btn.classList.add('loading');
+        btn.disabled = true;
+        
+        try {
+            await apiPost('/api/system/update/perform');
+            showToast('در حال بروزرسانی... لطفا منتظر بمانید', 'warning');
+            
+            // Poll for server to come back online
+            let retries = 0;
+            const pollInterval = setInterval(async () => {
+                try {
+                    retries++;
+                    if (retries > 3) {
+                        // After 6 seconds, check if health endpoint works
+                        const res = await fetch('/health');
+                        if (res.ok) {
+                            clearInterval(pollInterval);
+                            showToast('بروزرسانی با موفقیت انجام شد!', 'success');
+                            setTimeout(() => window.location.reload(), 1500);
+                        }
+                    }
+                } catch(e) {
+                    // Ignore disconnects while restarting
+                }
+                if(retries > 30) { // Timeout after 1 minute
+                    clearInterval(pollInterval);
+                    btn.classList.remove('loading');
+                    btn.disabled = false;
+                    showToast('پاسخی از سرور دریافت نشد. لطفا صفحه را مجددا بارگذاری کنید.', 'error');
+                }
+            }, 2000);
+            
+        } catch (error) {
+            btn.classList.remove('loading');
+            btn.disabled = false;
+            showToast('خطا در درخواست آپدیت', 'error');
+        }
     }
 </script>
 {% endblock %}

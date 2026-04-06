@@ -11,6 +11,7 @@ from .dashboard import router as dashboard_router
 from .blocking import router as blocking_router
 from .routes import router as routes_router
 from .groups import router as groups_router
+from .system import router as system_router
 
 __all__ = [
     "auth_router",
@@ -20,5 +21,6 @@ __all__ = [
     "dashboard_router",
     "blocking_router",
     "routes_router",
-    "groups_router"
+    "groups_router",
+    "system_router"
 ]

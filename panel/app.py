@@ -28,7 +28,8 @@ from api import (
     dashboard_router,
     blocking_router,
     routes_router,
-    groups_router
+    groups_router,
+    system_router
 )
 from services.logging_service import setup_logging
 
@@ -153,6 +154,7 @@ app.include_router(dashboard_router)
 app.include_router(blocking_router)
 app.include_router(routes_router)
 app.include_router(groups_router)
+app.include_router(system_router)
 
 
 # ========== Server-side Auth Helper ==========
