@@ -15,7 +15,7 @@ from services.firewall_service import FirewallService
 import logging
 
 # Configure logging to see what happens on connect
-logging.basicConfig(filename='/opt/ocserv-panel/logs/firewall.log', level=logging.DEBUG, 
+logging.basicConfig(filename='/opt/ocserv-panel/panel/logs/firewall.log', level=logging.DEBUG, 
                     format='%(asctime)s %(levelname)s: %(message)s')
 
 async def main():
