@@ -135,6 +135,8 @@ async def list_users(
     total = count_result.scalar()
     
     # Apply ordering first, then pagination
+    from sqlalchemy.orm import selectinload
+    query = query.options(selectinload(User.group))
     query = query.order_by(User.created_at.desc())
     query = query.offset((page - 1) * per_page).limit(per_page)
     
@@ -195,7 +197,13 @@ async def create_user(
     await db.commit()
     await db.refresh(new_user)
     
-    return new_user.to_dict()
+    # Reload with relationships
+    from sqlalchemy.orm import selectinload
+    stmt = select(User).options(selectinload(User.group)).where(User.id == new_user.id)
+    result = await db.execute(stmt)
+    loaded_user = result.scalar_one()
+    
+    return loaded_user.to_dict()
 
 
 @router.get("/{user_id}")
@@ -205,8 +213,9 @@ async def get_user(
     db: AsyncSession = Depends(get_db)
 ):
     """دریافت اطلاعات کاربر"""
+    from sqlalchemy.orm import selectinload
     result = await db.execute(
-        select(User).where(User.id == user_id)
+        select(User).options(selectinload(User.group)).where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
     
@@ -227,8 +236,9 @@ async def update_user(
     db: AsyncSession = Depends(get_db)
 ):
     """ویرایش کاربر"""
+    from sqlalchemy.orm import selectinload
     result = await db.execute(
-        select(User).where(User.id == user_id)
+        select(User).options(selectinload(User.group)).where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
     
@@ -278,7 +288,13 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     
-    return user.to_dict()
+    # Reload with relationships
+    from sqlalchemy.orm import selectinload
+    stmt = select(User).options(selectinload(User.group)).where(User.id == user.id)
+    result = await db.execute(stmt)
+    loaded_user = result.scalar_one()
+    
+    return loaded_user.to_dict()
 
 
 @router.delete("/{user_id}")

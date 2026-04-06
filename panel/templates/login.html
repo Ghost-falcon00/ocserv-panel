@@ -95,10 +95,20 @@
     </div>
 
     <script>
-        // Check if already logged in
+        // Check if already logged in and token is valid
         const token = localStorage.getItem('token');
         if (token) {
-            window.location.href = '/dashboard';
+            fetch('/api/auth/me', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            }).then(response => {
+                if (response.ok) {
+                    window.location.href = '/dashboard';
+                } else {
+                    localStorage.removeItem('token');
+                }
+            }).catch(() => {
+                localStorage.removeItem('token');
+            });
         }
 
         // Toggle password visibility
