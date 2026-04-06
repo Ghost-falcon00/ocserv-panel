@@ -20,8 +20,8 @@ chmod +x install.sh
 chmod +x update.sh
 chmod +x scripts/*.py
 
-# Apply Database Migrations safely
-sqlite3 panel/app.db "ALTER TABLE user_groups ADD COLUMN blocked_categories JSON;" 2>/dev/null
+# Apply Database Migrations safely (Fixed path to panel/data/panel.db)
+sqlite3 panel/data/panel.db "ALTER TABLE user_groups ADD COLUMN blocked_categories JSON;" 2>/dev/null
 
 # Setup OCServ DNS Template Service
 cat > /etc/systemd/system/ocserv-dns@.service << 'EOF'
