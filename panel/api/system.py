@@ -10,7 +10,7 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-import httpx
+import aiohttp
 
 from config import settings
 from models.database import get_db
@@ -65,39 +65,38 @@ async def check_update(current_admin: Admin = Depends(get_current_admin)):
     
     # Fetch latest commit from GitHub API
     try:
-        async with httpx.AsyncClient() as client:
+        async with aiohttp.ClientSession() as session:
             url = f"https://api.github.com/repos/{GITHUB_REPO}/commits/{BRANCH}"
-            response = await client.get(url, timeout=10.0)
-            
-            if response.status_code == 200:
-                data = response.json()
-                latest_hash = data.get("sha")
-                commit_info = data.get("commit", {})
-                message = commit_info.get("message", "")
-                date = commit_info.get("author", {}).get("date", "")
-                
-                # Check if update is available
-                # If local_hash is unknown or there is a new hash
-                is_available = False
-                if local_hash != "unknown" and latest_hash:
-                    # Simple equality check (if we diverged it will be different)
-                    # For safety, we just check if it's identical
-                    if not latest_hash.startswith(local_hash):
-                        is_available = True
-                elif local_hash == "unknown":
-                    # Assume available if we can't read local hash (for manual update trigger)
-                    is_available = True
+            async with session.get(url, timeout=10.0) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    latest_hash = data.get("sha")
+                    commit_info = data.get("commit", {})
+                    message = commit_info.get("message", "")
+                    date = commit_info.get("author", {}).get("date", "")
                     
-                return UpdateCheckResponse(
-                    update_available=is_available,
-                    local_hash=local_hash[:7] if local_hash != "unknown" else "unknown",
-                    latest_hash=latest_hash[:7] if latest_hash else None,
-                    message=message,
-                    date=date
-                )
-            else:
-                logger.error(f"GitHub API Error: {response.status_code} {response.text}")
-                raise HTTPException(status_code=500, detail="خطا در ارتباط با گیت‌هاب")
+                    # Check if update is available
+                    # If local_hash is unknown or there is a new hash
+                    is_available = False
+                    if local_hash != "unknown" and latest_hash:
+                        # Simple equality check
+                        if not latest_hash.startswith(local_hash):
+                            is_available = True
+                    elif local_hash == "unknown":
+                        # Assume available if we can't read local hash
+                        is_available = True
+                        
+                    return UpdateCheckResponse(
+                        update_available=is_available,
+                        local_hash=local_hash[:7] if local_hash != "unknown" else "unknown",
+                        latest_hash=latest_hash[:7] if latest_hash else None,
+                        message=message,
+                        date=date
+                    )
+                else:
+                    error_text = await response.text()
+                    logger.error(f"GitHub API Error: {response.status} {error_text}")
+                    raise HTTPException(status_code=500, detail="خطا در ارتباط با گیت‌هاب")
                 
     except Exception as e:
         logger.error(f"Update check failed: {e}")
