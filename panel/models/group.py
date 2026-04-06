@@ -33,6 +33,7 @@ class UserGroup(Base):
     # ═══════════════════════════════════════════════════════════
     blocked_domains = Column(JSON, default=list)   # لیست دامنه‌های مسدود
     allowed_domains = Column(JSON, default=list)   # لیست سفید (استثنا)
+    blocked_categories = Column(JSON, default=list) # لیست دسته‌های مسدود (تبلیغات، پورن و...)
 
     # ═══════════════════════════════════════════════════════════
     # محدودیت‌های پیش‌فرض (هنگام ساخت کاربر جدید)

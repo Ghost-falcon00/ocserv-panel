@@ -58,6 +58,24 @@
                 <input type="text" id="group-description" placeholder="مثلاً: کاربران بدون دسترسی به شبکه‌های اجتماعی">
             </div>
 
+            <div class="form-group" style="margin-top:20px;">
+                <label style="margin-bottom:8px;font-weight:600;">دسته‌بندی‌های مسدود (Micro-DNS)</label>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                    <label class="user-check-item" style="padding:6px 12px;display:flex;align-items:center;gap:6px;border-radius:4px;cursor:pointer;border:1px solid var(--border-color);">
+                        <input type="checkbox" name="blocked-categories" value="porn"> 🔞 پورنوگرافی
+                    </label>
+                    <label class="user-check-item" style="padding:6px 12px;display:flex;align-items:center;gap:6px;border-radius:4px;cursor:pointer;border:1px solid var(--border-color);">
+                        <input type="checkbox" name="blocked-categories" value="ads"> 🚫 تبلیغات
+                    </label>
+                    <label class="user-check-item" style="padding:6px 12px;display:flex;align-items:center;gap:6px;border-radius:4px;cursor:pointer;border:1px solid var(--border-color);">
+                        <input type="checkbox" name="blocked-categories" value="gambling"> 🎲 قمار
+                    </label>
+                    <label class="user-check-item" style="padding:6px 12px;display:flex;align-items:center;gap:6px;border-radius:4px;cursor:pointer;border:1px solid var(--border-color);">
+                        <input type="checkbox" name="blocked-categories" value="fakenews"> 🛡 مخرب/اخبار جعلی
+                    </label>
+                </div>
+            </div>
+
             <div class="modal-footer">
                 <button type="submit" class="btn btn-primary">ذخیره</button>
                 <button type="button" class="btn btn-secondary" onclick="closeGroupModal()">انصراف</button>
@@ -234,6 +252,7 @@
         document.getElementById('group-form').reset();
         document.getElementById('group-id').value = '';
         document.getElementById('group-color').value = '#6366f1';
+        document.querySelectorAll('input[name="blocked-categories"]').forEach(cb => cb.checked = false);
         document.getElementById('group-modal').classList.add('active');
     }
 
@@ -245,6 +264,12 @@
             document.getElementById('group-name').value = group.name;
             document.getElementById('group-description').value = group.description || '';
             document.getElementById('group-color').value = group.color || '#6366f1';
+            
+            const cats = group.blocked_categories || [];
+            document.querySelectorAll('input[name="blocked-categories"]').forEach(cb => {
+                cb.checked = cats.includes(cb.value);
+            });
+            
             document.getElementById('group-modal').classList.add('active');
         } catch (error) {
             showToast('خطا در دریافت اطلاعات', 'error');
@@ -255,10 +280,13 @@
         event.preventDefault();
         const id = document.getElementById('group-id').value;
 
+        const cats = Array.from(document.querySelectorAll('input[name="blocked-categories"]:checked')).map(cb => cb.value);
+
         const data = {
             name: document.getElementById('group-name').value,
             description: document.getElementById('group-description').value || null,
             color: document.getElementById('group-color').value,
+            blocked_categories: cats
         };
 
         try {

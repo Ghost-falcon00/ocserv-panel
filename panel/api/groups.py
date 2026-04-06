@@ -27,6 +27,7 @@ class GroupCreate(BaseModel):
     color: Optional[str] = "#6366f1"
     blocked_domains: Optional[List[str]] = []
     allowed_domains: Optional[List[str]] = []
+    blocked_categories: Optional[List[str]] = []
     default_max_traffic: Optional[int] = 0
     default_expire_days: Optional[int] = 30
     default_max_connections: Optional[int] = 2
@@ -40,6 +41,7 @@ class GroupUpdate(BaseModel):
     color: Optional[str] = None
     blocked_domains: Optional[List[str]] = None
     allowed_domains: Optional[List[str]] = None
+    blocked_categories: Optional[List[str]] = None
     default_max_traffic: Optional[int] = None
     default_expire_days: Optional[int] = None
     default_max_connections: Optional[int] = None
@@ -79,6 +81,7 @@ async def list_groups(
                 "color": g.color,
                 "blocked_domains": g.blocked_domains or [],
                 "allowed_domains": g.allowed_domains or [],
+                "blocked_categories": g.blocked_categories or [],
                 "default_max_traffic": g.default_max_traffic,
                 "default_expire_days": g.default_expire_days,
                 "default_max_connections": g.default_max_connections,
@@ -125,6 +128,7 @@ async def get_group(
         "color": group.color,
         "blocked_domains": group.blocked_domains or [],
         "allowed_domains": group.allowed_domains or [],
+        "blocked_categories": group.blocked_categories or [],
         "default_max_traffic": group.default_max_traffic,
         "default_expire_days": group.default_expire_days,
         "default_max_connections": group.default_max_connections,
@@ -163,6 +167,7 @@ async def create_group(
     # Normalize domains (lowercase, strip whitespace)
     blocked = [d.strip().lower() for d in (group_data.blocked_domains or []) if d.strip()]
     allowed = [d.strip().lower() for d in (group_data.allowed_domains or []) if d.strip()]
+    categories = [c.strip().lower() for c in (group_data.blocked_categories or []) if c.strip()]
 
     group = UserGroup(
         name=group_data.name,
@@ -170,6 +175,7 @@ async def create_group(
         color=group_data.color or "#6366f1",
         blocked_domains=blocked,
         allowed_domains=allowed,
+        blocked_categories=categories,
         default_max_traffic=group_data.default_max_traffic,
         default_expire_days=group_data.default_expire_days,
         default_max_connections=group_data.default_max_connections,
@@ -179,9 +185,10 @@ async def create_group(
     await db.commit()
     await db.refresh(group)
 
-    # Apply domain blocks via dnsmasq if any
-    if blocked:
-        await _apply_group_dns_blocks(group, db)
+    # Apply domain blocks
+    if blocked or categories:
+        from services.firewall_service import FirewallService
+        await FirewallService.sync_group(group.id, db)
 
     return {"message": "گروه ایجاد شد", "id": group.id}
 
@@ -208,15 +215,17 @@ async def update_group(
     # Update fields
     update_data = group_data.dict(exclude_unset=True)
     for field, value in update_data.items():
-        if field in ("blocked_domains", "allowed_domains") and value is not None:
+        if field in ("blocked_domains", "allowed_domains", "blocked_categories") and value is not None:
             value = [d.strip().lower() for d in value if d.strip()]
         setattr(group, field, value)
 
     await db.commit()
 
-    # Re-apply DNS blocks
-    if "blocked_domains" in update_data:
-        await _apply_group_dns_blocks(group, db)
+    # Apply firewall rules dynamically
+    if any(k in update_data for k in ("blocked_domains", "blocked_categories")):
+        # We will write the firewall sync function next
+        from services.firewall_service import FirewallService
+        await FirewallService.sync_group(group.id, db)
 
     return {"message": "گروه ویرایش شد"}
 
@@ -327,7 +336,8 @@ async def add_blocked_domains(
     group.blocked_domains = merged
     await db.commit()
 
-    await _apply_group_dns_blocks(group, db)
+    from services.firewall_service import FirewallService
+    await FirewallService.sync_group(group.id, db)
     return {"message": f"{len(new_domains)} دامنه بلاک شد", "total": len(merged)}
 
 
@@ -351,59 +361,11 @@ async def remove_blocked_domains(
     group.blocked_domains = [d for d in current if d not in remove_set]
     await db.commit()
 
-    await _apply_group_dns_blocks(group, db)
+    from services.firewall_service import FirewallService
+    await FirewallService.sync_group(group.id, db)
     return {"message": "دامنه‌ها حذف شدند"}
 
 
 # ========== Helper ==========
 
-async def _apply_group_dns_blocks(group: UserGroup, db: AsyncSession):
-    """
-    اعمال بلاک دامنه‌های گروه از طریق dnsmasq
-    هر گروه یک فایل کانفیگ dnsmasq جداگانه داره
-    """
-    import aiofiles
-    import logging
-    logger = logging.getLogger(__name__)
-
-    config_dir = "/etc/dnsmasq.d"
-    config_file = f"{config_dir}/ocserv-group-{group.id}.conf"
-
-    try:
-        blocked = group.blocked_domains or []
-        if not blocked:
-            # Remove config file if no blocked domains
-            import os
-            if os.path.exists(config_file):
-                os.remove(config_file)
-                # Reload dnsmasq
-                import asyncio
-                await asyncio.create_subprocess_exec(
-                    "systemctl", "restart", "dnsmasq",
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL
-                )
-            return
-
-        # Generate dnsmasq config: block by returning 0.0.0.0
-        lines = [f"# OCServ Group: {group.name} (ID: {group.id})\n"]
-        for domain in blocked:
-            # Block domain and all subdomains
-            lines.append(f"address=/{domain}/0.0.0.0\n")
-            lines.append(f"address=/{domain}/::\n")  # IPv6 block too
-
-        async with aiofiles.open(config_file, 'w') as f:
-            await f.writelines(lines)
-
-        # Reload dnsmasq to apply
-        import asyncio
-        proc = await asyncio.create_subprocess_exec(
-            "systemctl", "restart", "dnsmasq",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL
-        )
-        await proc.wait()
-
-        logger.info(f"Applied DNS blocks for group '{group.name}': {len(blocked)} domains")
-    except Exception as e:
-        logger.error(f"Error applying DNS blocks for group {group.id}: {e}")
+# Old DNS script removed

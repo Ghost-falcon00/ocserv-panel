@@ -444,6 +444,10 @@ output-buffer = 32768
 # Speed optimizations
 server-drain-ms = 0
 use-dbus = no
+
+# Custom Hooks (Firewall / Blocking)
+connect-script = /opt/ocserv-panel/scripts/on_connect.py
+disconnect-script = /opt/ocserv-panel/scripts/on_disconnect.py
 EOF
 
     # Create password file
@@ -556,10 +560,24 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+    cat > /etc/systemd/system/ocserv-dns@.service << 'EOF'
+[Unit]
+Description=OCServ per-group DNS for Group %I
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --no-daemon --port=5300%i --conf-file=/dev/null --addn-hosts=/etc/ocserv/dns/group_%i.hosts --server=1.1.1.1 --server=8.8.8.8
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     systemctl daemon-reload
     systemctl enable ocserv-panel
     
-    log_success "Systemd service created"
+    log_success "Systemd services created"
 }
 
 optimize_vps_network() {
