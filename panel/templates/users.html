@@ -253,7 +253,7 @@
                     <span class="traffic-text">
                         ${formatBytes(user.used_traffic)} / ${user.max_traffic > 0 ? formatBytes(user.max_traffic) : '∞'}
                     </span>
-                    ${user.reset_period_type ? `<span class="traffic-text" style="font-size:0.7rem;">${{
+                    ${user.reset_period_type ? `<span class="traffic-text" style="font-size:0.7rem;">${ {
                         'daily':'روزانه','weekly':'هفتگی','monthly':'ماهانه'
                     }[user.reset_period_type] || ''}</span>` : ''}
                 </div>
