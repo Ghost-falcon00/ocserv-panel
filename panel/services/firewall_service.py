@@ -8,6 +8,8 @@ import aiohttp
 import asyncio
 import logging
 import json
+import subprocess
+import shutil
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -15,6 +17,11 @@ from sqlalchemy import select
 from models.group import UserGroup
 from models.user import User
 from services.domain_scanner import DomainScanner
+
+# Resolve absolute paths for system binaries to prevent FileNotFoundError in systemd services
+CMD_SYSTEMCTL = shutil.which("systemctl") or "/bin/systemctl"
+CMD_IPTABLES = shutil.which("iptables") or "/sbin/iptables"
+CMD_OCCTL = shutil.which("occtl") or "/usr/bin/occtl"
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +44,7 @@ class FirewallService:
         """دریافت کاربران آنلاین و آی‌پی آن‌ها از طریق occtl"""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "occtl", "show", "users", "-o", "json",
+                CMD_OCCTL, "show", "users", "-o", "json",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -75,13 +82,12 @@ class FirewallService:
         conf_file = f"{OCSERV_DNS_DIR}/group_{group.id}.conf"
         hosts_file = f"{OCSERV_DNS_DIR}/group_{group.id}.hosts"
         
-        import subprocess
         # Determine if we even need custom DNS
         if not categories and not explicit_blocks:
             # Cleanup if they turned it off
             if os.path.exists(conf_file): os.remove(conf_file)
             if os.path.exists(hosts_file): os.remove(hosts_file)
-            subprocess.run(["systemctl", "stop", f"ocserv-dns@{group.id}"])
+            subprocess.run([CMD_SYSTEMCTL, "stop", f"ocserv-dns@{group.id}"])
             return
             
         # Download blocklists for categories
@@ -132,7 +138,7 @@ class FirewallService:
                 f.write(f"ipset=/.{base}/{ipset_v4},{ipset_v6}\n")
             
         # Restart the dns service for this group
-        subprocess.run(["systemctl", "restart", f"ocserv-dns@{group.id}"], 
+        subprocess.run([CMD_SYSTEMCTL, "restart", f"ocserv-dns@{group.id}"], 
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     @classmethod
@@ -174,13 +180,14 @@ class FirewallService:
         # 1. IPSet based block (Matches any dynamically scanned IP or DNSmasq intercepted IP)
         ipset_v4 = f"ocserv_g_{group.id}_ips"
         ipset_v6 = f"ocserv_g_{group.id}_ips_v6"
+        CMD_IPSET = shutil.which("ipset") or "/sbin/ipset"
         
         # Ensure the ipsets exist (avoids iptables failing if scanner hasn't run yet)
-        subprocess.run(["ipset", "create", ipset_v4, "hash:ip", "-exist"])
-        subprocess.run(["ipset", "create", ipset_v6, "hash:ip", "family", "inet6", "-exist"])
+        subprocess.run([CMD_IPSET, "create", ipset_v4, "hash:ip", "-exist"])
+        subprocess.run([CMD_IPSET, "create", ipset_v6, "hash:ip", "family", "inet6", "-exist"])
         
         # Block IPs in the IPSet
-        subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-m", "set", "--match-set", ipset_v4, "dst", "-j", "DROP"])
+        subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-m", "set", "--match-set", ipset_v4, "dst", "-j", "DROP"])
         # (Assuming IPv6 isn't heavily used in OCServ yet, but if it is, ip6tables should be used)
         
         # 1.5. Explicit domain string matches (Legacy DPI fallback)
@@ -193,16 +200,16 @@ class FirewallService:
                 keyword = domain # Fallback if too short
                 
             # Block DNS (UDP 53)
-            subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "53", 
+            subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "53", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
             # Block HTTPS (TCP 443) -> Kills SNI
-            subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "443", 
+            subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "443", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
             # Block HTTP3/QUIC (UDP 443) -> Kills UDP bypass for instagram/youtube
-            subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", 
+            subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
             # Block HTTP (TCP 80)
-            subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "80", 
+            subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "80", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
 
         # 2. DNS Interception (Categorical & Exact Domains)
@@ -211,37 +218,36 @@ class FirewallService:
         
         if categories or domains:
             port = DNSMASQ_BASE_PORT + group.id
-            subprocess.run(["iptables", "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "udp", 
+            subprocess.run([CMD_IPTABLES, "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "udp", 
                             "--dport", "53", "-j", "REDIRECT", "--to-ports", str(port)])
-            subprocess.run(["iptables", "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "tcp", 
+            subprocess.run([CMD_IPTABLES, "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "tcp", 
                             "--dport", "53", "-j", "REDIRECT", "--to-ports", str(port)])
             # Block well-known DoH (DNS-over-HTTPS) providers to prevent bypass
             doh_ips = ["8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112"]
             for dip in doh_ips:
-                subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-d", dip, "-p", "tcp", "--dport", "443", "-j", "DROP"])
-                subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-d", dip, "-p", "udp", "--dport", "443", "-j", "DROP"])
+                subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-d", dip, "-p", "tcp", "--dport", "443", "-j", "DROP"])
+                subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-d", dip, "-p", "udp", "--dport", "443", "-j", "DROP"])
         else:
             # Force them to use our global DNS (prevent bypass using DoH/Custom DNS)
-            subprocess.run(["iptables", "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "udp", 
+            subprocess.run([CMD_IPTABLES, "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "udp", 
                             "--dport", "53", "-j", "REDIRECT", "--to-ports", "53"])
 
     @staticmethod
     async def remove_user_rules(vpn_ip: str):
         """حذف تمامی رول‌های مربوط به کاربر آی‌پی"""
-        import subprocess
         # We delete all PREROUTING NAT rules involving this IP
         while True:
-            r = subprocess.run(f"iptables -t nat -S PREROUTING | grep '{vpn_ip}/32'", shell=True, capture_output=True, text=True)
+            r = subprocess.run(f"{CMD_IPTABLES} -t nat -S PREROUTING | grep '{vpn_ip}/32'", shell=True, capture_output=True, text=True)
             if not r.stdout.strip(): break
             # Parse the rule to delete it (e.g. "-A PREROUTING -s ...")
             rule = r.stdout.split('\n')[0]
             del_rule = rule.replace('-A ', '-D ')
-            subprocess.run(f"iptables -t nat {del_rule}", shell=True)
+            subprocess.run(f"{CMD_IPTABLES} -t nat {del_rule}", shell=True)
 
         # Delete all FORWARD rules involving this IP
         while True:
-            r = subprocess.run(f"iptables -S FORWARD | grep '{vpn_ip}/32'", shell=True, capture_output=True, text=True)
+            r = subprocess.run(f"{CMD_IPTABLES} -S FORWARD | grep '{vpn_ip}/32'", shell=True, capture_output=True, text=True)
             if not r.stdout.strip(): break
             rule = r.stdout.split('\n')[0]
             del_rule = rule.replace('-A ', '-D ')
-            subprocess.run(f"iptables {del_rule}", shell=True)
+            subprocess.run(f"{CMD_IPTABLES} {del_rule}", shell=True)

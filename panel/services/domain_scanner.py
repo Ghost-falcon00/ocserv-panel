@@ -1,6 +1,7 @@
 import asyncio
 import socket
 import logging
+import shutil
 from typing import List, Set
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -8,6 +9,8 @@ from models.database import async_session
 from models.group import UserGroup
 
 logger = logging.getLogger(__name__)
+
+CMD_IPSET = shutil.which("ipset") or "/sbin/ipset"
 
 # Common proxy subdomains used by apps to bypass SNI/DNS
 COMMON_SUBDOMAINS = [
@@ -100,19 +103,19 @@ class DomainScanner:
         set_name = f"ocserv_g_{group_id}_ips"
         
         # 1. Ensure IPSet exists
-        subprocess.run(["ipset", "create", set_name, "hash:ip", "-exist"], 
+        subprocess.run([CMD_IPSET, "create", set_name, "hash:ip", "-exist"], 
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["ipset", "create", f"{set_name}_v6", "hash:ip", "family", "inet6", "-exist"], 
+        subprocess.run([CMD_IPSET, "create", f"{set_name}_v6", "hash:ip", "family", "inet6", "-exist"], 
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         # 2. Add IPs (we use a loop to handle ipv4/ipv6 separately)
         for ip in ips:
             # Detect ipv6
             if ":" in ip:
-                subprocess.run(["ipset", "add", f"{set_name}_v6", ip, "-exist"], 
+                subprocess.run([CMD_IPSET, "add", f"{set_name}_v6", ip, "-exist"], 
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
-                subprocess.run(["ipset", "add", set_name, ip, "-exist"], 
+                subprocess.run([CMD_IPSET, "add", set_name, ip, "-exist"], 
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     @classmethod
