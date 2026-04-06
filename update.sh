@@ -66,6 +66,10 @@ fi
 
 systemctl restart ocserv
 
+# Ensure dependencies
+apt-get update -y
+apt-get install -y python3-pip python3-venv sqlite3 git curl ipset > /dev/null 2>&1
+
 # Update Python dependencies
 ./venv/bin/pip install -r requirements.txt > /dev/null 2>&1
 

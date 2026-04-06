@@ -118,12 +118,16 @@ class FirewallService:
             for domain in domains:
                 f.write(f"0.0.0.0 {domain}\n")
                 
-        # Write additional conf (for wildcard blocks)
+        # Write additional conf (for wildcard blocks & IPSet auto-population)
         with open(conf_file, "w") as f:
             f.write(f"# Group {group.name} DNS Config\n")
+            # Auto-populate the groups explicit IPSet from DNSmasq
+            ipset_v4 = f"ocserv_g_{group.id}_ips"
+            ipset_v6 = f"ocserv_g_{group.id}_ips_v6"
             for domain in explicit_blocks:
                 base = domain.replace('www.', '')
                 f.write(f"address=/.{base}/0.0.0.0\n")
+                f.write(f"ipset=/.{base}/{ipset_v4},{ipset_v6}\n")
             
         # Restart the dns service for this group
         await asyncio.create_subprocess_exec(
@@ -165,7 +169,19 @@ class FirewallService:
         """اعمال قوانین فایروال برای یک کاربر خاص"""
         import subprocess
         
-        # 1. Explicit domain blocks (IPTables String Match)
+        # 1. IPSet based block (Matches any dynamically scanned IP or DNSmasq intercepted IP)
+        ipset_v4 = f"ocserv_g_{group.id}_ips"
+        ipset_v6 = f"ocserv_g_{group.id}_ips_v6"
+        
+        # Ensure the ipsets exist (avoids iptables failing if scanner hasn't run yet)
+        subprocess.run(["ipset", "create", ipset_v4, "hash:ip", "-exist"])
+        subprocess.run(["ipset", "create", ipset_v6, "hash:ip", "family", "inet6", "-exist"])
+        
+        # Block IPs in the IPSet
+        subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-m", "set", "--match-set", ipset_v4, "dst", "-j", "DROP"])
+        # (Assuming IPv6 isn't heavily used in OCServ yet, but if it is, ip6tables should be used)
+        
+        # 1.5. Explicit domain string matches (Legacy DPI fallback)
         blocked_domains = group.blocked_domains or []
         for domain in blocked_domains:
             # Extract core keyword for DPI (e.g. "instagram.com" -> "instagram")

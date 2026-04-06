@@ -189,6 +189,8 @@ install_dependencies() {
         openssl \
         psmisc \
         conntrack \
+        dnsmasq \
+        ipset \
         > /dev/null 2>&1
     
     log_success "Dependencies installed"

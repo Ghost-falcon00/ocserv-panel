@@ -20,6 +20,7 @@ from models.database import init_db, async_session
 from models.admin import Admin
 from services.traffic import traffic_service
 from services.quota import quota_service
+from services.domain_scanner import DomainScanner
 from api import (
     auth_router,
     users_router,
@@ -88,6 +89,9 @@ async def lifespan(app: FastAPI):
     # Create default admin
     await create_default_admin()
     
+    # Start Dynamic IP Domain Scanner
+    scanner_task = asyncio.create_task(DomainScanner.start_background_loop())
+    
     # Start scheduler
     scheduler.add_job(
         traffic_update_task,
@@ -113,6 +117,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
+    scanner_task.cancel()
     scheduler.shutdown()
     logger.info("OCServ Panel stopped")
 
