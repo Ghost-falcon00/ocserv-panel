@@ -153,18 +153,24 @@ class FirewallService:
         # 1. Explicit domain blocks (IPTables String Match)
         blocked_domains = group.blocked_domains or []
         for domain in blocked_domains:
+            # Extract core keyword for DPI (e.g. "instagram.com" -> "instagram")
+            # to match raw DNS packets (which don't use literal dots) and all subdomains efficiently.
+            keyword = domain.split('.')[0] if '.' in domain else domain
+            if len(keyword) < 3: 
+                keyword = domain # Fallback if too short
+                
             # Block DNS (UDP 53)
             subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "53", 
-                            "-m", "string", "--string", domain, "--algo", "bm", "-j", "DROP"])
+                            "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
             # Block HTTPS (TCP 443) -> Kills SNI
             subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "443", 
-                            "-m", "string", "--string", domain, "--algo", "bm", "-j", "DROP"])
+                            "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
             # Block HTTP3/QUIC (UDP 443) -> Kills UDP bypass for instagram/youtube
             subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", 
-                            "-m", "string", "--string", domain, "--algo", "bm", "-j", "DROP"])
+                            "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
             # Block HTTP (TCP 80)
             subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "80", 
-                            "-m", "string", "--string", domain, "--algo", "bm", "-j", "DROP"])
+                            "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
 
         # 2. DNS Interception (Categorical Blocks)
         categories = group.blocked_categories or []
