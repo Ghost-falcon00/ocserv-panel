@@ -51,12 +51,20 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 
-# Inject Hooks into OCServ Configuration if lacking
-if ! grep -q "^connect-script" /etc/ocserv/ocserv.conf; then
+# Inject Hooks into OCServ Configuration (Replace old ones if present)
+if grep -q "^connect-script" /etc/ocserv/ocserv.conf; then
+    sed -i 's|^connect-script.*|connect-script = /opt/ocserv-panel/scripts/on_connect.py|g' /etc/ocserv/ocserv.conf
+else
     echo "connect-script = /opt/ocserv-panel/scripts/on_connect.py" >> /etc/ocserv/ocserv.conf
-    echo "disconnect-script = /opt/ocserv-panel/scripts/on_disconnect.py" >> /etc/ocserv/ocserv.conf
-    systemctl restart ocserv
 fi
+
+if grep -q "^disconnect-script" /etc/ocserv/ocserv.conf; then
+    sed -i 's|^disconnect-script.*|disconnect-script = /opt/ocserv-panel/scripts/on_disconnect.py|g' /etc/ocserv/ocserv.conf
+else
+    echo "disconnect-script = /opt/ocserv-panel/scripts/on_disconnect.py" >> /etc/ocserv/ocserv.conf
+fi
+
+systemctl restart ocserv
 
 # Update Python dependencies
 ./venv/bin/pip install -r requirements.txt > /dev/null 2>&1
