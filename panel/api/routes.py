@@ -240,7 +240,7 @@ async def update_all_routes(
 @router.post("/apply")
 async def apply_route_changes(admin = Depends(get_current_admin)):
     """اعمال تغییرات روت‌ها با restart سرور"""
-    success = await ocserv_service.restart_server()
+    success = await ocserv_service.restart_service()
     
     if success:
         return {

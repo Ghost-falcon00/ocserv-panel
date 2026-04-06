@@ -7,6 +7,7 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, BigInteger, T
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .database import Base
+from .group import UserGroup
 from datetime import datetime, timedelta
 
 
@@ -62,13 +63,20 @@ class User(Base):
     plan_id = Column(Integer, ForeignKey("subscription_plans.id"), nullable=True)
     
     # ═══════════════════════════════════════════════════════════
+    # گروه کاربری
+    # ═══════════════════════════════════════════════════════════
+    group_id = Column(Integer, ForeignKey("user_groups.id"), nullable=True)
+    group = relationship("UserGroup", back_populates="users", lazy="selectin")
+    
+    # ═══════════════════════════════════════════════════════════
     # محدودیت حجم
     # ═══════════════════════════════════════════════════════════
     max_traffic = Column(BigInteger, default=0)  # حداکثر ترافیک (bytes) - 0 = نامحدود
     used_traffic = Column(BigInteger, default=0)  # ترافیک مصرف شده (bytes)
     
     # دوره ریست حجم
-    reset_period_days = Column(Integer, default=0)  # مثلاً 30 = ماهانه - 0 = بدون ریست
+    reset_period_days = Column(Integer, default=0)  # 0 = بدون ریست
+    reset_period_type = Column(String(10), default="monthly")  # daily / weekly / monthly
     last_reset_date = Column(DateTime, nullable=True)  # آخرین ریست
     
     # ═══════════════════════════════════════════════════════════
@@ -156,23 +164,38 @@ class User(Base):
         return max(0, delta.days)
     
     @property
+    def _effective_reset_days(self) -> int:
+        """محاسبه تعداد روز ریست بر اساس نوع دوره"""
+        if self.reset_period_days > 0:
+            return self.reset_period_days
+        # Calculate from reset_period_type
+        type_map = {
+            "daily": 1,
+            "weekly": 7, 
+            "monthly": 30
+        }
+        return type_map.get(self.reset_period_type, 0)
+
+    @property
     def needs_traffic_reset(self) -> bool:
         """آیا نیاز به ریست حجم دارد؟"""
-        if self.reset_period_days <= 0:
+        days = self._effective_reset_days
+        if days <= 0:
             return False
         if self.last_reset_date is None:
             return True
-        next_reset = self.last_reset_date + timedelta(days=self.reset_period_days)
+        next_reset = self.last_reset_date + timedelta(days=days)
         return datetime.now() >= next_reset
     
     @property
     def next_reset_date(self) -> datetime:
         """تاریخ ریست بعدی"""
-        if self.reset_period_days <= 0:
+        days = self._effective_reset_days
+        if days <= 0:
             return None
         if self.last_reset_date is None:
             return datetime.now()
-        return self.last_reset_date + timedelta(days=self.reset_period_days)
+        return self.last_reset_date + timedelta(days=days)
     
     @property
     def can_connect(self) -> bool:
@@ -233,11 +256,13 @@ class User(Base):
             "traffic_remaining": self.traffic_remaining,
             "traffic_percent": self.traffic_percent,
             "expire_date": self.expire_date.isoformat() if self.expire_date else None,
+            "expire_days": self.expire_days,
             "days_remaining": self.days_remaining,
             "max_connections": self.max_connections,
             "current_connections": self.current_connections,
             "connection_slots_available": self.connection_slots_available,
             "reset_period_days": self.reset_period_days,
+            "reset_period_type": self.reset_period_type,
             "next_reset_date": self.next_reset_date.isoformat() if self.next_reset_date else None,
             "is_active": self.is_active,
             "is_online": self.is_online,
@@ -245,6 +270,9 @@ class User(Base):
             "is_traffic_exceeded": self.is_traffic_exceeded,
             "can_connect": self.can_connect,
             "note": self.note,
+            "group_id": self.group_id,
+            "group_name": self.group.name if self.group else None,
+            "group_color": self.group.color if self.group else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_connection": self.last_connection.isoformat() if self.last_connection else None,
             "total_connections": self.total_connections,

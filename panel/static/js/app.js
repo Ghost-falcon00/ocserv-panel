@@ -74,6 +74,8 @@ function checkAuth() {
 
 function logout() {
     localStorage.removeItem('token');
+    // Clear auth cookie (set expired)
+    document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
     window.location.href = '/login';
 }
 

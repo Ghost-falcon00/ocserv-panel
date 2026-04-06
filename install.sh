@@ -210,10 +210,27 @@ setup_ssl() {
         return
     fi
     
+    # Actually check if port 80 is available
+    PORT80_IN_USE=false
+    PORT80_SERVICE=""
+    
+    if ss -tlnp | grep -q ':80 '; then
+        PORT80_IN_USE=true
+        PORT80_SERVICE=$(ss -tlnp | grep ':80 ' | awk '{print $NF}' | head -1)
+        log_warning "Port 80 is currently in use by: $PORT80_SERVICE"
+    else
+        log_info "Port 80 is available for Let's Encrypt"
+    fi
+    
     # Ask user about SSL type
     echo ""
-    log_warning "Port 80 required for Let's Encrypt. If busy, use self-signed."
-    read -p "$(echo -e ${YELLOW}Use self-signed certificate? \[y/N\]: ${NC})" USE_SELFSIGNED
+    if [[ "$PORT80_IN_USE" == "true" ]]; then
+        log_warning "Port 80 is occupied by: $PORT80_SERVICE"
+        log_warning "Let's Encrypt needs port 80. We can try to free it, or use self-signed."
+        read -p "$(echo -e ${YELLOW}Use self-signed certificate? \[y/N\]: ${NC})" USE_SELFSIGNED
+    else
+        read -p "$(echo -e ${YELLOW}Use self-signed certificate instead of Let\'s Encrypt? \[y/N\]: ${NC})" USE_SELFSIGNED
+    fi
     
     if [[ "$USE_SELFSIGNED" =~ ^[Yy]$ ]]; then
         log_info "Creating self-signed certificate..."
@@ -228,6 +245,17 @@ setup_ssl() {
         fuser -k 80/tcp 2>/dev/null || true
         
         sleep 2
+        
+        # Verify port 80 is actually free now
+        if ss -tlnp | grep -q ':80 '; then
+            log_error "Port 80 is STILL in use after stopping services!"
+            log_warning "Service still blocking: $(ss -tlnp | grep ':80 ' | awk '{print $NF}' | head -1)"
+            log_info "Falling back to self-signed certificate..."
+            create_self_signed_cert
+            return
+        fi
+        
+        log_info "Port 80 is now free. Requesting certificate..."
         
         # Try snap certbot first
         if command -v snap &> /dev/null; then
@@ -405,10 +433,14 @@ dtls-legacy = true
 
 # Compression (can help with speed)
 compression = true
-no-compress-limit = 256
+no-compress-limit = 64
 
 # Output buffer for better performance
-output-buffer = 23000
+output-buffer = 32768
+
+# Speed optimizations
+server-drain-ms = 0
+use-dbus = no
 EOF
 
     # Create password file
@@ -557,13 +589,16 @@ net.ipv4.tcp_congestion_control = bbr
 # ═══════════════════════════════════════════════════════════
 # افزایش بافر دریافت
 net.core.rmem_default = 1048576
-net.core.rmem_max = 16777216
-net.ipv4.tcp_rmem = 4096 1048576 16777216
+net.core.rmem_max = 67108864
+net.ipv4.tcp_rmem = 4096 1048576 67108864
 
 # افزایش بافر ارسال
 net.core.wmem_default = 1048576
-net.core.wmem_max = 16777216
-net.ipv4.tcp_wmem = 4096 1048576 16777216
+net.core.wmem_max = 67108864
+net.ipv4.tcp_wmem = 4096 1048576 67108864
+
+# کاهش latency - مهم برای سرعت
+net.ipv4.tcp_notsent_lowat = 16384
 
 # بافر عمومی
 net.core.optmem_max = 65535

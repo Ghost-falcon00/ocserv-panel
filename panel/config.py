@@ -15,6 +15,39 @@ import os
 BASE_DIR = Path(__file__).parent
 
 
+def _ensure_secret_key() -> str:
+    """
+    SECRET_KEY را از .env می‌خواند.
+    اگر وجود نداشت، یکبار تولید و در .env ذخیره می‌کند.
+    اینطوری بعد از restart، توکن‌های قبلی معتبر می‌مونن.
+    """
+    env_path = BASE_DIR / ".env"
+    
+    # Check if .env already has SECRET_KEY
+    if env_path.exists():
+        try:
+            content = env_path.read_text(encoding="utf-8")
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("SECRET_KEY="):
+                    value = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+                    if value:
+                        return value
+        except Exception:
+            pass
+    
+    # Generate new key and persist to .env
+    key = secrets.token_urlsafe(32)
+    try:
+        os.makedirs(env_path.parent, exist_ok=True)
+        with open(env_path, "a", encoding="utf-8") as f:
+            f.write(f"\nSECRET_KEY={key}\n")
+    except Exception:
+        pass  # In worst case, will generate a new key next restart
+    
+    return key
+
+
 class Settings(BaseSettings):
     # Application
     APP_NAME: str = "OCServ Panel"
@@ -24,8 +57,8 @@ class Settings(BaseSettings):
     # Paths - use computed default
     DATABASE_PATH: str = str(BASE_DIR / "data" / "panel.db")
     
-    # Security
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    # Security - persistent across restarts
+    SECRET_KEY: str = Field(default_factory=_ensure_secret_key)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     
@@ -38,7 +71,7 @@ class Settings(BaseSettings):
     # Panel settings
     PANEL_PORT: int = 8443
     PANEL_HOST: str = "0.0.0.0"
-    PANEL_PATH: str = ""  # Secret path for extra security
+    PANEL_PATH: str = str(BASE_DIR.parent)  # Default to project root for file paths
     
     # Domain and Admin (set by installer)
     DOMAIN: str = ""
@@ -61,6 +94,11 @@ class Settings(BaseSettings):
     @property
     def database_path(self) -> Path:
         return Path(self.DATABASE_PATH)
+    
+    @property
+    def log_dir(self) -> Path:
+        """مسیر صحیح دایرکتوری لاگ‌ها"""
+        return BASE_DIR / "logs"
 
 
 settings = Settings()

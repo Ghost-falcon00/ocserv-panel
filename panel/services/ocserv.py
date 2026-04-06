@@ -292,24 +292,34 @@ class OCServService:
     # ========== تنظیمات ==========
     
     async def get_config(self) -> Dict[str, str]:
-        """خواندن تنظیمات OCServ"""
+        """خواندن تنظیمات OCServ - ساپورت هر دو فرمت key=value و key = value"""
+        import aiofiles
         config = {}
         try:
-            with open(self.config_file, 'r') as f:
-                for line in f:
+            async with aiofiles.open(self.config_file, 'r') as f:
+                async for line in f:
                     line = line.strip()
-                    if line and not line.startswith('#') and '=' in line:
+                    if not line or line.startswith('#'):
+                        continue
+                    # OCServ uses 'key = value' format (with spaces)
+                    if '=' in line:
                         key, value = line.split('=', 1)
                         config[key.strip()] = value.strip()
+                    elif ' ' in line:
+                        # Some settings use space without = (rare)
+                        parts = line.split(None, 1)
+                        if len(parts) == 2:
+                            config[parts[0].strip()] = parts[1].strip()
         except Exception as e:
             logger.error(f"Error reading config: {e}")
         return config
     
     async def update_config(self, key: str, value: str) -> bool:
         """به‌روزرسانی یک تنظیم در فایل کانفیگ"""
+        import aiofiles
         try:
-            with open(self.config_file, 'r') as f:
-                lines = f.readlines()
+            async with aiofiles.open(self.config_file, 'r') as f:
+                lines = await f.readlines()
             
             updated = False
             new_lines = []
@@ -324,8 +334,8 @@ class OCServService:
             if not updated:
                 new_lines.append(f"{key} = {value}\n")
             
-            with open(self.config_file, 'w') as f:
-                f.writelines(new_lines)
+            async with aiofiles.open(self.config_file, 'w') as f:
+                await f.writelines(new_lines)
             
             return True
         except Exception as e:

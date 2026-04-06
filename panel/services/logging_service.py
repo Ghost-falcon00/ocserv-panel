@@ -10,8 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from config import settings
 
-# Log directory
-LOG_DIR = Path(settings.PANEL_PATH) / "panel" / "logs"
+# Log directory - use the correct path from settings
+LOG_DIR = settings.log_dir
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Max log file size: 10MB, keep 3 backup files

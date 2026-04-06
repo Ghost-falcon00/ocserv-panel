@@ -29,6 +29,8 @@ class UserCreate(BaseModel):
     expire_days: int = Field(default=0, ge=0, description="مدت اعتبار (روز) - 0 = نامحدود")
     max_connections: int = Field(default=2, ge=1, description="حداکثر اتصال همزمان")
     note: Optional[str] = Field(default=None, description="یادداشت")
+    group_id: Optional[int] = Field(default=None, description="شناسه گروه")
+    reset_period_type: Optional[str] = Field(default="monthly", description="نوع دوره ریست: daily/weekly/monthly")
 
 
 class UserUpdate(BaseModel):
@@ -39,6 +41,8 @@ class UserUpdate(BaseModel):
     max_connections: Optional[int] = Field(default=None, ge=1, description="حداکثر اتصال همزمان")
     is_active: Optional[bool] = Field(default=None, description="فعال/غیرفعال")
     note: Optional[str] = Field(default=None, description="یادداشت")
+    group_id: Optional[int] = Field(default=None, description="شناسه گروه")
+    reset_period_type: Optional[str] = Field(default=None, description="نوع دوره ریست")
 
 
 class UserResponse(BaseModel):
@@ -48,11 +52,16 @@ class UserResponse(BaseModel):
     max_traffic: int
     used_traffic: int
     expire_date: Optional[datetime]
+    expire_days: Optional[int] = 0
     max_connections: int
     is_active: bool
     is_online: bool
     current_connections: int
     note: Optional[str]
+    group_id: Optional[int] = None
+    group_name: Optional[str] = None
+    group_color: Optional[str] = None
+    reset_period_type: Optional[str] = "monthly"
     created_at: datetime
     last_connection: Optional[datetime]
     total_connections: int
@@ -125,9 +134,9 @@ async def list_users(
     )
     total = count_result.scalar()
     
-    # Apply pagination
-    query = query.offset((page - 1) * per_page).limit(per_page)
+    # Apply ordering first, then pagination
     query = query.order_by(User.created_at.desc())
+    query = query.offset((page - 1) * per_page).limit(per_page)
     
     result = await db.execute(query)
     users = result.scalars().all()
@@ -173,12 +182,14 @@ async def create_user(
     # Add to database - expire_date will be calculated on first connection
     new_user = User(
         username=user_data.username,
-        password=user_data.password,  # Stored for password changes
+        password=user_data.password,
         max_traffic=user_data.max_traffic,
-        expire_days=user_data.expire_days,  # Days, not date
-        expire_date=None,  # Will be set on first connection
+        expire_days=user_data.expire_days,
+        expire_date=None,
         max_connections=user_data.max_connections,
-        note=user_data.note
+        note=user_data.note,
+        group_id=user_data.group_id,
+        reset_period_type=user_data.reset_period_type or "monthly"
     )
     db.add(new_user)
     await db.commit()
@@ -259,6 +270,10 @@ async def update_user(
             await ocserv_service.lock_user(user.username)
     if user_data.note is not None:
         user.note = user_data.note
+    if user_data.group_id is not None:
+        user.group_id = user_data.group_id if user_data.group_id != 0 else None
+    if user_data.reset_period_type is not None:
+        user.reset_period_type = user_data.reset_period_type
     
     await db.commit()
     await db.refresh(user)

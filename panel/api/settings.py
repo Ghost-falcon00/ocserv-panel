@@ -167,11 +167,13 @@ async def update_setting(
     
     await db.commit()
     
-    # Update OCServ config file
-    success = await ocserv_service.update_config(key, setting_data.value)
-    if not success:
-        # Rollback is not critical, setting is saved in DB
-        pass
+    # Update OCServ config file using the correct config_key
+    config_key = default.get("config_key", key)
+    if config_key:
+        success = await ocserv_service.update_config(config_key, setting_data.value)
+        if not success:
+            # Config file update failed, but DB is saved
+            pass
     
     return SettingItem(
         key=setting.key,

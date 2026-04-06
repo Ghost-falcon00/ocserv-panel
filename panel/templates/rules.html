@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+
+{% block title %}قوانین و بلاک‌لیست | OCServ Panel{% endblock %}
+
+{% block page_title %}قوانین و بلاک‌لیست دامنه{% endblock %}
+
+{% block content %}
+<div class="rules-page">
+    <!-- Global Domain Blacklist -->
+    <div class="card">
+        <div class="card-header">
+            <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;vertical-align:middle;margin-left:8px;">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                </svg>
+                بلاک‌لیست دامنه‌ها (عمومی)
+            </h3>
+            <span class="badge" id="blocked-count">0</span>
+        </div>
+        <div class="card-body">
+            <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:16px;">
+                دامنه‌هایی که اینجا اضافه کنید، برای <strong>تمام کاربران</strong> VPN مسدود خواهند شد.
+            </p>
+
+            <!-- Add Domain Form -->
+            <div class="add-domain-form">
+                <div class="input-with-btn">
+                    <input type="text" id="new-domain" placeholder="مثال: example.com" 
+                           onkeypress="if(event.key==='Enter')addDomain()">
+                    <button class="btn btn-primary" onclick="addDomain()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                        افزودن
+                    </button>
+                </div>
+                <small class="form-hint">دامنه اصلی وارد کنید (بدون http/https). ساب‌دامنه‌ها نیز مسدود خواهند شد.</small>
+            </div>
+
+            <!-- Bulk Add -->
+            <details class="bulk-section">
+                <summary class="btn btn-secondary" style="margin:12px 0;">
+                    افزودن گروهی (هر خط یک دامنه)
+                </summary>
+                <div style="padding-top:12px;">
+                    <textarea id="bulk-domains" rows="4" placeholder="هر خط یک دامنه:&#10;example.com&#10;blocked-site.net"></textarea>
+                    <button class="btn btn-primary" onclick="addBulkDomains()" style="margin-top:8px;">افزودن همه</button>
+                </div>
+            </details>
+
+            <!-- Search -->
+            <div class="search-box" style="margin:16px 0;max-width:100%;">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="domain-search" placeholder="جستجو در دامنه‌ها..." oninput="filterDomains()">
+            </div>
+
+            <!-- Domains List -->
+            <div class="domains-list" id="domains-list">
+                <div class="loading-spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group Specific Rules -->
+    <div class="card" style="margin-top:20px;">
+        <div class="card-header">
+            <h3>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;vertical-align:middle;margin-left:8px;">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+                قوانین گروهی
+            </h3>
+        </div>
+        <div class="card-body">
+            <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:16px;">
+                هر گروه می‌تواند بلاک‌لیست اختصاصی داشته باشد. برای مدیریت آن به 
+                <a href="/groups">صفحه گروه‌ها</a> بروید.
+            </p>
+
+            <div id="group-rules-list">
+                <div class="loading-spinner"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let allDomains = [];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        checkAuth();
+        loadBlockedDomains();
+        loadGroupRules();
+    });
+
+    async function loadBlockedDomains() {
+        try {
+            const data = await apiGet('/api/blocking/status');
+            allDomains = data.custom_domains || [];
+            document.getElementById('blocked-count').textContent = allDomains.length;
+            renderDomains(allDomains);
+        } catch (error) {
+            console.error('Error loading domains:', error);
+            // Try alternative approach
+            allDomains = [];
+            renderDomains(allDomains);
+        }
+    }
+
+    function renderDomains(domains) {
+        const container = document.getElementById('domains-list');
+
+        if (domains.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state small">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M8 12h8"/>
+                    </svg>
+                    <p>هیچ دامنه‌ای بلاک نشده</p>
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = domains.map(domain => `
+            <div class="domain-item" data-domain="${domain}">
+                <div class="domain-info">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;color:var(--danger);">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                    </svg>
+                    <span class="domain-name">${domain}</span>
+                    <span class="domain-sub">*.${domain}</span>
+                </div>
+                <button class="btn-icon danger" onclick="removeDomain('${domain}')" title="حذف">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                </button>
+            </div>
+        `).join('');
+    }
+
+    function filterDomains() {
+        const search = document.getElementById('domain-search').value.toLowerCase();
+        const filtered = allDomains.filter(d => d.includes(search));
+        renderDomains(filtered);
+    }
+
+    async function addDomain() {
+        const input = document.getElementById('new-domain');
+        let domain = input.value.trim().toLowerCase();
+
+        // Clean up domain
+        domain = domain.replace(/^https?:\/\//, '').replace(/\/$/, '').replace(/^www\./, '');
+
+        if (!domain || !domain.includes('.')) {
+            showToast('دامنه معتبر وارد کنید', 'error');
+            return;
+        }
+
+        if (allDomains.includes(domain)) {
+            showToast('این دامنه قبلاً اضافه شده', 'warning');
+            return;
+        }
+
+        try {
+            await apiPost('/api/blocking/custom-domain', { domain });
+            allDomains.push(domain);
+            document.getElementById('blocked-count').textContent = allDomains.length;
+            renderDomains(allDomains);
+            input.value = '';
+            showToast(`دامنه ${domain} بلاک شد`, 'success');
+        } catch (error) {
+            showToast(error.message || 'خطا در افزودن دامنه', 'error');
+        }
+    }
+
+    async function addBulkDomains() {
+        const textarea = document.getElementById('bulk-domains');
+        const lines = textarea.value.split('\n').map(l => l.trim().toLowerCase()).filter(l => l && l.includes('.'));
+
+        if (lines.length === 0) {
+            showToast('حداقل یک دامنه معتبر وارد کنید', 'error');
+            return;
+        }
+
+        let added = 0;
+        for (const domain of lines) {
+            const clean = domain.replace(/^https?:\/\//, '').replace(/\/$/, '').replace(/^www\./, '');
+            if (clean && !allDomains.includes(clean)) {
+                try {
+                    await apiPost('/api/blocking/custom-domain', { domain: clean });
+                    allDomains.push(clean);
+                    added++;
+                } catch (e) { /* skip */ }
+            }
+        }
+
+        document.getElementById('blocked-count').textContent = allDomains.length;
+        renderDomains(allDomains);
+        textarea.value = '';
+        showToast(`${added} دامنه اضافه شد`, 'success');
+    }
+
+    async function removeDomain(domain) {
+        if (!confirm(`آیا از حذف ${domain} از بلاک‌لیست مطمئن هستید؟`)) return;
+
+        try {
+            await apiDelete(`/api/blocking/custom-domain/${encodeURIComponent(domain)}`);
+            allDomains = allDomains.filter(d => d !== domain);
+            document.getElementById('blocked-count').textContent = allDomains.length;
+            renderDomains(allDomains);
+            showToast(`دامنه ${domain} از بلاک‌لیست حذف شد`, 'success');
+        } catch (error) {
+            showToast('خطا در حذف دامنه', 'error');
+        }
+    }
+
+    async function loadGroupRules() {
+        try {
+            const data = await apiGet('/api/groups');
+            const container = document.getElementById('group-rules-list');
+
+            if (!data.groups || data.groups.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state small">
+                        <p>هیچ گروهی ایجاد نشده. <a href="/groups">ساخت گروه جدید</a></p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = data.groups.map(group => `
+                <div class="group-rule-item">
+                    <div class="group-rule-header">
+                        <span class="group-color-dot" style="background:${group.color}"></span>
+                        <strong>${group.name}</strong>
+                        <span class="badge">${group.blocked_domains_count} دامنه</span>
+                        <span class="text-muted" style="margin-right:auto;">${group.user_count} کاربر</span>
+                    </div>
+                    ${group.blocked_domains && group.blocked_domains.length > 0 ? `
+                        <div class="group-domains-preview">
+                            ${group.blocked_domains.slice(0, 5).map(d => `<span class="domain-tag">${d}</span>`).join('')}
+                            ${group.blocked_domains.length > 5 ? `<span class="domain-tag more">+${group.blocked_domains.length - 5} بیشتر</span>` : ''}
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        } catch (error) {
+            document.getElementById('group-rules-list').innerHTML = '<p class="text-muted">خطا در بارگذاری</p>';
+        }
+    }
+</script>
+{% endblock %}

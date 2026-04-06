@@ -20,7 +20,7 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 # Setup dedicated traffic logger
-LOG_DIR = Path(settings.PANEL_PATH) / "panel" / "logs"
+LOG_DIR = settings.log_dir
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 traffic_logger = logging.getLogger("traffic_file")
@@ -187,12 +187,21 @@ class TrafficService:
             
             # Mark offline users
             online_usernames = [u['username'] for u in online_users]
-            stmt = (
-                update(User)
-                .where(User.is_online == True)
-                .where(User.username.notin_(online_usernames) if online_usernames else True)
-                .values(is_online=False, current_connections=0)
-            )
+            if online_usernames:
+                # Only mark users offline if they're not in the current online list
+                stmt = (
+                    update(User)
+                    .where(User.is_online == True)
+                    .where(User.username.notin_(online_usernames))
+                    .values(is_online=False, current_connections=0)
+                )
+            else:
+                # No one is online, mark all as offline
+                stmt = (
+                    update(User)
+                    .where(User.is_online == True)
+                    .values(is_online=False, current_connections=0)
+                )
             await session.execute(stmt)
             
             # Remove offline users from tracking

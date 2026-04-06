@@ -91,11 +91,21 @@ async def stream_logs(
     """
     استریم لاگ real-time
     با Server-Sent Events
+    حداکثر 5 دقیقه - بعد از آن باید مجدد وصل شود
     """
+    import time
+    
     async def event_generator():
         last_count = 0
+        start_time = time.time()
+        max_duration = 300  # 5 minutes timeout
         
         while True:
+            # Check timeout to prevent unlimited connections
+            if time.time() - start_time > max_duration:
+                yield "event: timeout\ndata: connection_timeout\n\n"
+                return
+            
             # Get appropriate logs
             if log_type == "panel":
                 logs = log_reader.read_panel_logs(50)

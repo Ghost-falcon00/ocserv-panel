@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from jose import JWTError, jwt
 
 from config import settings
 from models.database import init_db, async_session
@@ -26,7 +27,8 @@ from api import (
     logs_router,
     dashboard_router,
     blocking_router,
-    routes_router
+    routes_router,
+    groups_router
 )
 from services.logging_service import setup_logging
 
@@ -122,10 +124,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
+# CORS middleware - restricted to same origin only
+# No external origins allowed for security
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[],  # No external origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -149,6 +152,26 @@ app.include_router(logs_router)
 app.include_router(dashboard_router)
 app.include_router(blocking_router)
 app.include_router(routes_router)
+app.include_router(groups_router)
+
+
+# ========== Server-side Auth Helper ==========
+
+def _verify_token_from_cookie(request: Request) -> bool:
+    """بررسی توکن JWT از کوکی یا هدر Authorization"""
+    token = request.cookies.get("access_token")
+    if not token:
+        # Also check Authorization header (for API compatibility)
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if not token:
+        return False
+    try:
+        jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return True
+    except (JWTError, Exception):
+        return False
 
 
 # ========== Frontend Routes ==========
@@ -167,32 +190,58 @@ async def login_page(request: Request):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request):
-    """صفحه داشبورد"""
+    """صفحه داشبورد - نیاز به احراز هویت"""
+    if not _verify_token_from_cookie(request):
+        return RedirectResponse(url="/login")
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
 @app.get("/users", response_class=HTMLResponse)
 async def users_page(request: Request):
-    """صفحه مدیریت کاربران"""
+    """صفحه مدیریت کاربران - نیاز به احراز هویت"""
+    if not _verify_token_from_cookie(request):
+        return RedirectResponse(url="/login")
     return templates.TemplateResponse("users.html", {"request": request})
 
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    """صفحه تنظیمات"""
+    """صفحه تنظیمات - نیاز به احراز هویت"""
+    if not _verify_token_from_cookie(request):
+        return RedirectResponse(url="/login")
     return templates.TemplateResponse("settings.html", {"request": request})
 
 
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
-    """صفحه لاگ‌ها"""
+    """صفحه لاگ‌ها - نیاز به احراز هویت"""
+    if not _verify_token_from_cookie(request):
+        return RedirectResponse(url="/login")
     return templates.TemplateResponse("logs.html", {"request": request})
 
 
 @app.get("/system-logs", response_class=HTMLResponse)
 async def system_logs_page(request: Request):
-    """صفحه لاگ سیستم"""
+    """صفحه لاگ سیستم - نیاز به احراز هویت"""
+    if not _verify_token_from_cookie(request):
+        return RedirectResponse(url="/login")
     return templates.TemplateResponse("system_logs.html", {"request": request})
+
+
+@app.get("/rules", response_class=HTMLResponse)
+async def rules_page(request: Request):
+    """صفحه قوانین و بلاک‌لیست - نیاز به احراز هویت"""
+    if not _verify_token_from_cookie(request):
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("rules.html", {"request": request})
+
+
+@app.get("/groups", response_class=HTMLResponse)
+async def groups_page(request: Request):
+    """صفحه گروه‌ها - نیاز به احراز هویت"""
+    if not _verify_token_from_cookie(request):
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("groups.html", {"request": request})
 
 
 # ========== Health Check ==========

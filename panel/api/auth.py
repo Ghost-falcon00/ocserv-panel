@@ -3,7 +3,7 @@ Authentication API
 API احراز هویت
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -54,7 +54,7 @@ class AdminResponse(BaseModel):
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """ایجاد توکن JWT"""
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
@@ -132,11 +132,23 @@ async def login(
         expires_delta=access_token_expires
     )
     
-    return {
+    response = {
         "access_token": access_token,
         "token_type": "bearer",
         "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     }
+    
+    # Set cookie for server-side auth check on frontend pages
+    from fastapi.responses import JSONResponse
+    json_response = JSONResponse(content=response)
+    json_response.set_cookie(
+        key="access_token",
+        value=access_token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        samesite="strict"
+    )
+    return json_response
 
 
 @router.get("/me", response_model=AdminResponse)
@@ -147,21 +159,25 @@ async def get_current_admin_info(
     return current_admin
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 @router.post("/change-password")
 async def change_password(
-    current_password: str,
-    new_password: str,
+    password_data: ChangePasswordRequest,
     current_admin: Admin = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """تغییر رمز عبور ادمین"""
-    if not current_admin.verify_password(current_password):
+    if not current_admin.verify_password(password_data.current_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="رمز عبور فعلی اشتباه است"
         )
     
-    current_admin.set_password(new_password)
+    current_admin.set_password(password_data.new_password)
     await db.commit()
     
     return {"message": "رمز عبور با موفقیت تغییر کرد"}

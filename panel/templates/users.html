@@ -47,6 +47,7 @@
                     <tr>
                         <th>کاربر</th>
                         <th>وضعیت</th>
+                        <th>گروه</th>
                         <th>ترافیک</th>
                         <th>انقضا</th>
                         <th>اتصال</th>
@@ -55,7 +56,7 @@
                 </thead>
                 <tbody id="users-table-body">
                     <tr>
-                        <td colspan="6" class="loading-cell">
+                        <td colspan="7" class="loading-cell">
                             <div class="loading-spinner"></div>
                         </td>
                     </tr>
@@ -109,9 +110,27 @@
                     <small class="form-hint">۰ = نامحدود</small>
                 </div>
                 <div class="form-group">
+                    <label for="user-reset-type">دوره ریست حجم</label>
+                    <select id="user-reset-type">
+                        <option value="monthly">ماهانه (30 روز)</option>
+                        <option value="weekly">هفتگی (7 روز)</option>
+                        <option value="daily">روزانه</option>
+                    </select>
+                    <small class="form-hint">حجم مصرفی در هر دوره ریست می‌شود</small>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
                     <label for="user-days">مدت اعتبار (روز)</label>
                     <input type="number" id="user-days" min="0" value="30" placeholder="تعداد روز">
                     <small class="form-hint">۰ = نامحدود | از اولین اتصال محاسبه میشود</small>
+                </div>
+                <div class="form-group">
+                    <label for="user-group">گروه</label>
+                    <select id="user-group">
+                        <option value="">بدون گروه</option>
+                    </select>
                 </div>
             </div>
 
@@ -152,7 +171,19 @@
     document.addEventListener('DOMContentLoaded', () => {
         checkAuth();
         loadUsers();
+        loadGroupsList();
     });
+
+    async function loadGroupsList() {
+        try {
+            const data = await apiGet('/api/groups');
+            const select = document.getElementById('user-group');
+            select.innerHTML = '<option value="">\u0628\u062f\u0648\u0646 \u06af\u0631\u0648\u0647</option>';
+            (data.groups || []).forEach(g => {
+                select.innerHTML += `<option value="${g.id}">${g.name}</option>`;
+            });
+        } catch(e) { /* ignore */ }
+    }
 
     function debounceSearch() {
         clearTimeout(searchTimeout);
@@ -185,7 +216,7 @@
         const tbody = document.getElementById('users-table-body');
 
         if (users.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">کاربری یافت نشد</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">کاربری یافت نشد</td></tr>';
             return;
         }
 
@@ -204,8 +235,14 @@
                 <span class="status-badge ${user.is_active ? 'active' : 'inactive'}">
                     ${user.is_active ? 'فعال' : 'غیرفعال'}
                 </span>
-                ${user.is_online ? '<span class="status-badge online">آنلاین</span>' :
-                (user.last_connection ? `<span class="last-seen">${formatTimeAgo(user.last_connection)}</span>` : '')}
+                ${user.is_online ? '<span class="status-badge online">🟢 آنلاین</span>' :
+                (user.last_connection ? `<span class="last-seen">${formatTimeAgo(user.last_connection)}</span>` : '<span class="last-seen">بدون اتصال</span>')}
+            </td>
+            <td>
+                ${user.group_name ? 
+                    `<span class="group-badge" style="border-color:${user.group_color || '#6366f1'}">${user.group_name}</span>` : 
+                    '<span class="text-muted" style="font-size:0.8rem;">—</span>'
+                }
             </td>
             <td>
                 <div class="traffic-cell">
@@ -216,6 +253,9 @@
                     <span class="traffic-text">
                         ${formatBytes(user.used_traffic)} / ${user.max_traffic > 0 ? formatBytes(user.max_traffic) : '∞'}
                     </span>
+                    ${user.reset_period_type ? `<span class="traffic-text" style="font-size:0.7rem;">${{
+                        'daily':'روزانه','weekly':'هفتگی','monthly':'ماهانه'
+                    }[user.reset_period_type] || ''}</span>` : ''}
                 </div>
             </td>
             <td>
@@ -339,6 +379,8 @@
             document.getElementById('user-connections').value = user.max_connections;
             document.getElementById('user-active').checked = user.is_active;
             document.getElementById('user-note').value = user.note || '';
+            document.getElementById('user-group').value = user.group_id || '';
+            document.getElementById('user-reset-type').value = user.reset_period_type || 'monthly';
 
             document.getElementById('user-modal').classList.add('active');
         } catch (error) {
@@ -367,6 +409,13 @@
         // Send expire_days instead of expire_date
         const expireDays = parseInt(document.getElementById('user-days').value) || 0;
         data.expire_days = expireDays;
+
+        // Group
+        const groupId = document.getElementById('user-group').value;
+        data.group_id = groupId ? parseInt(groupId) : null;
+
+        // Reset period type
+        data.reset_period_type = document.getElementById('user-reset-type').value;
 
         try {
             if (id) {
