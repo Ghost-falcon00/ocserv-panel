@@ -57,8 +57,8 @@ async function apiPut(endpoint, data) {
     return apiRequest('PUT', endpoint, data);
 }
 
-async function apiDelete(endpoint) {
-    return apiRequest('DELETE', endpoint);
+async function apiDelete(endpoint, body = null) {
+    return apiRequest('DELETE', endpoint, body);
 }
 
 // ========== Authentication ==========

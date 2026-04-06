@@ -128,6 +128,20 @@ class User(Base):
     # ═══════════════════════════════════════════════════════════
     
     @property
+    def group_name(self) -> str:
+        """نام گروه کاربر"""
+        if self.group:
+            return self.group.name
+        return None
+
+    @property
+    def group_color(self) -> str:
+        """رنگ گروه کاربر"""
+        if self.group:
+            return self.group.color
+        return None
+
+    @property
     def traffic_remaining(self) -> int:
         """ترافیک باقی‌مانده (bytes)"""
         if self.max_traffic == 0:

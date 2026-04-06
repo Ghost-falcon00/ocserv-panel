@@ -96,7 +96,7 @@ class ExpiryExtend(BaseModel):
 
 # ========== Endpoints ==========
 
-@router.get("", response_model=UserListResponse)
+@router.get("")
 async def list_users(
     page: int = Query(1, ge=1, description="شماره صفحه"),
     per_page: int = Query(20, ge=1, le=100, description="تعداد در هر صفحه"),
@@ -142,7 +142,7 @@ async def list_users(
     users = result.scalars().all()
     
     return {
-        "users": users,
+        "users": [u.to_dict() for u in users],
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -150,7 +150,7 @@ async def list_users(
     }
 
 
-@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("")
 async def create_user(
     user_data: UserCreate,
     current_admin: Admin = Depends(get_current_admin),
@@ -195,10 +195,10 @@ async def create_user(
     await db.commit()
     await db.refresh(new_user)
     
-    return new_user
+    return new_user.to_dict()
 
 
-@router.get("/{user_id}", response_model=UserResponse)
+@router.get("/{user_id}")
 async def get_user(
     user_id: int,
     current_admin: Admin = Depends(get_current_admin),
@@ -216,10 +216,10 @@ async def get_user(
             detail="کاربر یافت نشد"
         )
     
-    return user
+    return user.to_dict()
 
 
-@router.put("/{user_id}", response_model=UserResponse)
+@router.put("/{user_id}")
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
@@ -278,7 +278,7 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     
-    return user
+    return user.to_dict()
 
 
 @router.delete("/{user_id}")

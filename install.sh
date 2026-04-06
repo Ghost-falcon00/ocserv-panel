@@ -222,14 +222,17 @@ setup_ssl() {
         log_info "Port 80 is available for Let's Encrypt"
     fi
     
-    # Ask user about SSL type
-    echo ""
+    USE_SELFSIGNED="n"
+    
     if [[ "$PORT80_IN_USE" == "true" ]]; then
+        # Port 80 is busy — ask user
+        echo ""
         log_warning "Port 80 is occupied by: $PORT80_SERVICE"
         log_warning "Let's Encrypt needs port 80. We can try to free it, or use self-signed."
         read -p "$(echo -e ${YELLOW}Use self-signed certificate? \[y/N\]: ${NC})" USE_SELFSIGNED
     else
-        read -p "$(echo -e ${YELLOW}Use self-signed certificate instead of Let\'s Encrypt? \[y/N\]: ${NC})" USE_SELFSIGNED
+        # Port 80 is free — go directly to Let's Encrypt
+        log_info "Requesting Let's Encrypt certificate automatically..."
     fi
     
     if [[ "$USE_SELFSIGNED" =~ ^[Yy]$ ]]; then

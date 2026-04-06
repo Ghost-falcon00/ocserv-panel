@@ -8,9 +8,11 @@
 <div class="groups-page">
     <!-- Header -->
     <div class="page-actions">
-        <h3 style="margin:0;color:var(--text-secondary);">گروه‌بندی کاربران و کنترل دسترسی</h3>
+        <p style="margin:0;color:var(--text-muted);font-size:0.9rem;">
+            گروه بسازید، کاربران را به آن اضافه کنید و دامنه‌های مسدود را تعیین کنید.
+        </p>
         <button class="btn btn-primary" onclick="showCreateGroupModal()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
@@ -18,8 +20,8 @@
         </button>
     </div>
 
-    <!-- Groups Grid -->
-    <div class="groups-grid" id="groups-grid">
+    <!-- Groups List -->
+    <div id="groups-container">
         <div class="loading-spinner"></div>
     </div>
 </div>
@@ -27,7 +29,7 @@
 <!-- Create/Edit Group Modal -->
 <div class="modal" id="group-modal">
     <div class="modal-backdrop" onclick="closeGroupModal()"></div>
-    <div class="modal-content" style="max-width:600px;">
+    <div class="modal-content" style="max-width:550px;">
         <div class="modal-header">
             <h3 id="group-modal-title">گروه جدید</h3>
             <button class="btn-icon" onclick="closeGroupModal()">
@@ -41,58 +43,19 @@
             <input type="hidden" id="group-id">
 
             <div class="form-row">
-                <div class="form-group">
+                <div class="form-group" style="flex:3">
                     <label for="group-name">نام گروه</label>
                     <input type="text" id="group-name" required placeholder="مثال: کاربران ویژه">
                 </div>
-                <div class="form-group">
+                <div class="form-group" style="flex:1">
                     <label for="group-color">رنگ</label>
-                    <input type="color" id="group-color" value="#6366f1" style="width:100%;height:42px;border:none;cursor:pointer;">
+                    <input type="color" id="group-color" value="#6366f1" style="width:100%;height:42px;border:none;cursor:pointer;border-radius:var(--radius-sm);">
                 </div>
             </div>
 
             <div class="form-group">
-                <label for="group-description">توضیحات</label>
-                <input type="text" id="group-description" placeholder="توضیح کوتاه (اختیاری)">
-            </div>
-
-            <div class="form-group">
-                <label>دامنه‌های مسدود</label>
-                <textarea id="group-blocked-domains" rows="3" placeholder="هر خط یک دامنه:&#10;instagram.com&#10;facebook.com"></textarea>
-                <small class="form-hint">دامنه‌هایی که کاربران این گروه نمی‌توانند به آنها دسترسی داشته باشند</small>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label>حداکثر ترافیک پیش‌فرض</label>
-                    <div class="input-with-unit">
-                        <input type="number" id="group-traffic" min="0" value="0">
-                        <select id="group-traffic-unit">
-                            <option value="1073741824">GB</option>
-                            <option value="1048576">MB</option>
-                        </select>
-                    </div>
-                    <small class="form-hint">0 = نامحدود</small>
-                </div>
-                <div class="form-group">
-                    <label>دوره ریست حجم</label>
-                    <select id="group-reset-type">
-                        <option value="monthly">ماهانه (30 روز)</option>
-                        <option value="weekly">هفتگی (7 روز)</option>
-                        <option value="daily">روزانه</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label>مدت اعتبار (روز)</label>
-                    <input type="number" id="group-expire-days" min="0" value="30">
-                </div>
-                <div class="form-group">
-                    <label>حداکثر اتصال</label>
-                    <input type="number" id="group-connections" min="1" value="2">
-                </div>
+                <label for="group-description">توضیحات (اختیاری)</label>
+                <input type="text" id="group-description" placeholder="مثلاً: کاربران بدون دسترسی به شبکه‌های اجتماعی">
             </div>
 
             <div class="modal-footer">
@@ -102,48 +65,109 @@
         </form>
     </div>
 </div>
+
+<!-- Manage Users Modal -->
+<div class="modal" id="users-modal">
+    <div class="modal-backdrop" onclick="closeUsersModal()"></div>
+    <div class="modal-content" style="max-width:500px;">
+        <div class="modal-header">
+            <h3 id="users-modal-title">مدیریت کاربران گروه</h3>
+            <button class="btn-icon" onclick="closeUsersModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+        <div style="padding:20px;">
+            <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:12px;">کاربرانی که می‌خواهید به این گروه اضافه کنید انتخاب کنید:</p>
+            <div id="users-checklist" style="max-height:350px;overflow-y:auto;">
+                <div class="loading-spinner"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="saveUserAssignments()">ذخیره تغییرات</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Domains Modal -->
+<div class="modal" id="domains-modal">
+    <div class="modal-backdrop" onclick="closeDomainsModal()"></div>
+    <div class="modal-content" style="max-width:550px;">
+        <div class="modal-header">
+            <h3 id="domains-modal-title">دامنه‌های مسدود گروه</h3>
+            <button class="btn-icon" onclick="closeDomainsModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+        <div style="padding:20px;">
+            <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:12px;">
+                کاربران این گروه <strong>نمی‌توانند</strong> به این دامنه‌ها دسترسی داشته باشند.
+            </p>
+            <!-- Add domain -->
+            <div class="input-with-btn" style="margin-bottom:16px;">
+                <input type="text" id="new-blocked-domain" placeholder="مثال: instagram.com" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlockedDomain();}">
+                <button class="btn btn-primary" onclick="addBlockedDomain()">افزودن</button>
+            </div>
+            <div id="blocked-domains-list" style="max-height:300px;overflow-y:auto;">
+            </div>
+            <div class="modal-footer" style="margin-top:16px;">
+                <button class="btn btn-secondary" onclick="closeDomainsModal()">بستن</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+    let currentGroupId = null;
+    let allUsers = [];
+
     document.addEventListener('DOMContentLoaded', () => {
         checkAuth();
         loadGroups();
     });
+
+    // ==================== Groups ====================
 
     async function loadGroups() {
         try {
             const data = await apiGet('/api/groups');
             renderGroups(data.groups);
         } catch (error) {
-            console.error('Error loading groups:', error);
             showToast('خطا در دریافت گروه‌ها', 'error');
         }
     }
 
     function renderGroups(groups) {
-        const grid = document.getElementById('groups-grid');
+        const container = document.getElementById('groups-container');
 
         if (!groups || groups.length === 0) {
-            grid.innerHTML = `
+            container.innerHTML = `
                 <div class="empty-state">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
                         <circle cx="9" cy="7" r="4"/>
-                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                        <line x1="19" y1="8" x2="19" y2="14"/>
+                        <line x1="22" y1="11" x2="16" y2="11"/>
                     </svg>
-                    <p>هیچ گروهی ایجاد نشده</p>
-                    <button class="btn btn-primary" onclick="showCreateGroupModal()" style="margin-top:12px;">ساخت گروه اول</button>
+                    <p>هنوز گروهی نساختی</p>
+                    <p style="font-size:0.85rem;color:var(--text-muted);">با ساخت گروه می‌تونی دسترسی کاربران رو مدیریت کنی</p>
+                    <button class="btn btn-primary" onclick="showCreateGroupModal()" style="margin-top:16px;">ساخت اولین گروه</button>
                 </div>`;
             return;
         }
 
-        grid.innerHTML = groups.map(group => `
-            <div class="group-card" style="border-top:3px solid ${group.color}">
+        container.innerHTML = groups.map(group => `
+            <div class="group-card" style="border-right:4px solid ${group.color};margin-bottom:16px;">
                 <div class="group-card-header">
-                    <div>
-                        <h3 style="margin:0;">${group.name}</h3>
+                    <div style="flex:1;">
+                        <h3 style="margin:0;font-size:1.1rem;">${group.name}</h3>
                         ${group.description ? `<p class="text-muted" style="margin:4px 0 0;font-size:0.85rem;">${group.description}</p>` : ''}
                     </div>
                     <div class="action-buttons">
@@ -161,29 +185,49 @@
                         </button>
                     </div>
                 </div>
-                <div class="group-card-stats">
-                    <div class="group-stat">
-                        <span class="group-stat-value">${group.user_count}</span>
-                        <span class="group-stat-label">کاربر</span>
+
+                <!-- Stats Row -->
+                <div style="display:flex;gap:24px;padding:16px 0;border-top:1px solid var(--border-color);margin-top:12px;">
+                    <div style="text-align:center;flex:1;">
+                        <div style="font-size:1.5rem;font-weight:700;color:var(--text-primary);">${group.user_count}</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);">کاربر</div>
                     </div>
-                    <div class="group-stat">
-                        <span class="group-stat-value">${group.blocked_domains_count}</span>
-                        <span class="group-stat-label">دامنه مسدود</span>
-                    </div>
-                    <div class="group-stat">
-                        <span class="group-stat-value">${group.default_max_connections}</span>
-                        <span class="group-stat-label">اتصال همزمان</span>
+                    <div style="text-align:center;flex:1;">
+                        <div style="font-size:1.5rem;font-weight:700;color:var(--danger);">${group.blocked_domains_count}</div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);">دامنه بلاک</div>
                     </div>
                 </div>
+
+                <!-- Blocked Domains Preview -->
                 ${group.blocked_domains && group.blocked_domains.length > 0 ? `
-                    <div class="group-domains-preview" style="margin-top:12px;">
-                        ${group.blocked_domains.slice(0, 4).map(d => `<span class="domain-tag">${d}</span>`).join('')}
-                        ${group.blocked_domains.length > 4 ? `<span class="domain-tag more">+${group.blocked_domains.length - 4}</span>` : ''}
+                    <div class="group-domains-preview" style="margin-bottom:12px;">
+                        ${group.blocked_domains.slice(0, 5).map(d => `<span class="domain-tag">${d}</span>`).join('')}
+                        ${group.blocked_domains.length > 5 ? `<span class="domain-tag more">+${group.blocked_domains.length - 5}</span>` : ''}
                     </div>
                 ` : ''}
+
+                <!-- Action Buttons -->
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-secondary" onclick="openUsersModal(${group.id}, '${group.name}')" style="flex:1;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                        </svg>
+                        مدیریت کاربران
+                    </button>
+                    <button class="btn btn-secondary" onclick="openDomainsModal(${group.id}, '${group.name}')" style="flex:1;border-color:var(--danger);color:var(--danger);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                        </svg>
+                        دامنه‌های مسدود
+                    </button>
+                </div>
             </div>
         `).join('');
     }
+
+    // ==================== Create/Edit Group ====================
 
     function showCreateGroupModal() {
         document.getElementById('group-modal-title').textContent = 'گروه جدید';
@@ -201,35 +245,20 @@
             document.getElementById('group-name').value = group.name;
             document.getElementById('group-description').value = group.description || '';
             document.getElementById('group-color').value = group.color || '#6366f1';
-            document.getElementById('group-blocked-domains').value = (group.blocked_domains || []).join('\n');
-            document.getElementById('group-traffic').value = (group.default_max_traffic || 0) / 1073741824;
-            document.getElementById('group-traffic-unit').value = '1073741824';
-            document.getElementById('group-reset-type').value = group.default_reset_period_type || 'monthly';
-            document.getElementById('group-expire-days').value = group.default_expire_days || 30;
-            document.getElementById('group-connections').value = group.default_max_connections || 2;
             document.getElementById('group-modal').classList.add('active');
         } catch (error) {
-            showToast('خطا در دریافت اطلاعات گروه', 'error');
+            showToast('خطا در دریافت اطلاعات', 'error');
         }
     }
 
     async function saveGroup(event) {
         event.preventDefault();
         const id = document.getElementById('group-id').value;
-        const trafficVal = parseFloat(document.getElementById('group-traffic').value) || 0;
-        const trafficUnit = parseInt(document.getElementById('group-traffic-unit').value);
-        const blockedText = document.getElementById('group-blocked-domains').value;
-        const blockedDomains = blockedText.split('\n').map(d => d.trim().toLowerCase()).filter(d => d);
 
         const data = {
             name: document.getElementById('group-name').value,
             description: document.getElementById('group-description').value || null,
             color: document.getElementById('group-color').value,
-            blocked_domains: blockedDomains,
-            default_max_traffic: Math.floor(trafficVal * trafficUnit),
-            default_expire_days: parseInt(document.getElementById('group-expire-days').value) || 30,
-            default_max_connections: parseInt(document.getElementById('group-connections').value) || 2,
-            default_reset_period_type: document.getElementById('group-reset-type').value
         };
 
         try {
@@ -243,23 +272,164 @@
             closeGroupModal();
             loadGroups();
         } catch (error) {
-            showToast(error.message || 'خطا در ذخیره گروه', 'error');
+            showToast(error.message || 'خطا', 'error');
         }
     }
 
     async function deleteGroup(id, name) {
-        if (!confirm(`آیا از حذف گروه "${name}" مطمئن هستید؟`)) return;
+        if (!confirm(`آیا از حذف گروه "${name}" مطمئن هستید؟\nکاربران از گروه خارج می‌شوند ولی حذف نمی‌شوند.`)) return;
         try {
             await apiDelete(`/api/groups/${id}`);
             showToast('گروه حذف شد', 'success');
             loadGroups();
         } catch (error) {
-            showToast('خطا در حذف گروه', 'error');
+            showToast('خطا در حذف', 'error');
         }
     }
 
     function closeGroupModal() {
         document.getElementById('group-modal').classList.remove('active');
+    }
+
+    // ==================== Users Management ====================
+
+    async function openUsersModal(groupId, groupName) {
+        currentGroupId = groupId;
+        document.getElementById('users-modal-title').textContent = `کاربران گروه: ${groupName}`;
+        document.getElementById('users-modal').classList.add('active');
+
+        const checklist = document.getElementById('users-checklist');
+        checklist.innerHTML = '<div class="loading-spinner"></div>';
+
+        try {
+            // Load all users and group info
+            const [usersData, groupData] = await Promise.all([
+                apiGet('/api/users?per_page=500'),
+                apiGet(`/api/groups/${groupId}`)
+            ]);
+
+            allUsers = usersData.users;
+            const groupUserIds = (groupData.users || []).map(u => u.id);
+
+            checklist.innerHTML = allUsers.map(user => `
+                <label class="user-check-item" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
+                    <input type="checkbox" value="${user.id}" ${groupUserIds.includes(user.id) ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;">
+                    <span class="user-avatar" style="width:30px;height:30px;font-size:0.8rem;">${user.username.charAt(0).toUpperCase()}</span>
+                    <div style="flex:1;">
+                        <span style="font-weight:500;">${user.username}</span>
+                        ${user.group_name && user.group_id != groupId ? `<span style="font-size:0.75rem;color:var(--warning);margin-right:8px;">در گروه: ${user.group_name}</span>` : ''}
+                    </div>
+                    <span class="status-badge ${user.is_active ? 'active' : 'inactive'}" style="font-size:0.7rem;">${user.is_active ? 'فعال' : 'غیرفعال'}</span>
+                </label>
+            `).join('');
+        } catch (error) {
+            checklist.innerHTML = '<p class="text-muted" style="padding:20px;text-align:center;">خطا در بارگذاری</p>';
+        }
+    }
+
+    async function saveUserAssignments() {
+        const checked = [...document.querySelectorAll('#users-checklist input:checked')].map(i => parseInt(i.value));
+        const unchecked = [...document.querySelectorAll('#users-checklist input:not(:checked)')].map(i => parseInt(i.value));
+
+        try {
+            // Assign checked users
+            if (checked.length > 0) {
+                await apiPost(`/api/groups/${currentGroupId}/assign`, { user_ids: checked });
+            }
+            // Unassign unchecked users
+            if (unchecked.length > 0) {
+                await apiPost(`/api/groups/${currentGroupId}/unassign`, { user_ids: unchecked });
+            }
+
+            showToast('کاربران گروه بروزرسانی شد', 'success');
+            closeUsersModal();
+            loadGroups();
+        } catch (error) {
+            showToast('خطا در ذخیره', 'error');
+        }
+    }
+
+    function closeUsersModal() {
+        document.getElementById('users-modal').classList.remove('active');
+    }
+
+    // ==================== Domains Management ====================
+
+    async function openDomainsModal(groupId, groupName) {
+        currentGroupId = groupId;
+        document.getElementById('domains-modal-title').textContent = `دامنه‌های مسدود: ${groupName}`;
+        document.getElementById('domains-modal').classList.add('active');
+        document.getElementById('new-blocked-domain').value = '';
+        await loadBlockedDomains();
+    }
+
+    async function loadBlockedDomains() {
+        const list = document.getElementById('blocked-domains-list');
+        try {
+            const group = await apiGet(`/api/groups/${currentGroupId}`);
+            const domains = group.blocked_domains || [];
+
+            if (domains.length === 0) {
+                list.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:20px;">هیچ دامنه‌ای مسدود نشده</p>';
+                return;
+            }
+
+            list.innerHTML = domains.map(d => `
+                <div class="domain-item">
+                    <div class="domain-info">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;color:var(--danger);flex-shrink:0;">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                        </svg>
+                        <span class="domain-name">${d}</span>
+                    </div>
+                    <button class="btn-icon danger" onclick="removeBlockedDomain('${d}')" title="حذف">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+            `).join('');
+        } catch (error) {
+            list.innerHTML = '<p class="text-muted">خطا</p>';
+        }
+    }
+
+    async function addBlockedDomain() {
+        const input = document.getElementById('new-blocked-domain');
+        let domain = input.value.trim().toLowerCase()
+            .replace(/^https?:\/\//, '').replace(/\/$/, '').replace(/^www\./, '');
+
+        if (!domain || !domain.includes('.')) {
+            showToast('دامنه معتبر وارد کنید', 'error');
+            return;
+        }
+
+        try {
+            await apiPost(`/api/groups/${currentGroupId}/domains/block`, { domains: [domain] });
+            input.value = '';
+            showToast(`${domain} مسدود شد`, 'success');
+            await loadBlockedDomains();
+            loadGroups(); // refresh counts
+        } catch (error) {
+            showToast('خطا', 'error');
+        }
+    }
+
+    async function removeBlockedDomain(domain) {
+        try {
+            await apiDelete(`/api/groups/${currentGroupId}/domains/block`, { domains: [domain] });
+            showToast(`${domain} حذف شد`, 'success');
+            await loadBlockedDomains();
+            loadGroups();
+        } catch (error) {
+            showToast('خطا', 'error');
+        }
+    }
+
+    function closeDomainsModal() {
+        document.getElementById('domains-modal').classList.remove('active');
     }
 </script>
 {% endblock %}
