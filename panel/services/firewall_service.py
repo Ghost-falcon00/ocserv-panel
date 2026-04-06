@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from models.group import UserGroup
 from models.user import User
+from services.domain_scanner import DomainScanner
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,9 @@ class FirewallService:
         
         # 1. Setup DNS daemon for categories
         await cls.setup_group_dns(group)
+        
+        # 1.5 Sync Dynamic IPs for this group aggressively
+        asyncio.create_task(DomainScanner.scan_group(group))
         
         # 2. Re-apply iptables for all ONLINE users in this group
         online_users = await cls.get_online_users()

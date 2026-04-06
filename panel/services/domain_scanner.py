@@ -62,11 +62,35 @@ class DomainScanner:
                         target = f"{sub}.{clean_domain}" if sub else clean_domain
                         resolved = await cls.resolve_domain(target)
                         target_ips.update(resolved)
+                        
+                if target_ips:
+                    logger.info(f"DomainScanner: Found {len(target_ips)} IPs for Group {group.name}")
+                
                 
                 # 2. Inject into IPSet
                 await cls.sync_group_ipset(group.id, target_ips)
                 
         logger.info("DomainScanner: Finished IP aggregation cycle.")
+
+    @classmethod
+    async def scan_group(cls, group: UserGroup):
+        """Actively scans IPs for a single group, called upon group update."""
+        explicit_blocks = group.blocked_domains or []
+        if not explicit_blocks:
+            return
+            
+        target_ips = set()
+        for root_domain in explicit_blocks:
+            clean_domain = root_domain.strip().replace("www.", "")
+            if not clean_domain: continue
+            
+            for sub in COMMON_SUBDOMAINS:
+                target = f"{sub}.{clean_domain}" if sub else clean_domain
+                target_ips.update(await cls.resolve_domain(target))
+                
+        if target_ips:
+            await cls.sync_group_ipset(group.id, target_ips)
+            logger.info(f"DomainScanner: Sync'd {len(target_ips)} IPs for group {group.name} instantly.")
 
     @classmethod
     async def sync_group_ipset(cls, group_id: int, ips: Set[str]):
