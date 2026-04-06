@@ -75,12 +75,13 @@ class FirewallService:
         conf_file = f"{OCSERV_DNS_DIR}/group_{group.id}.conf"
         hosts_file = f"{OCSERV_DNS_DIR}/group_{group.id}.hosts"
         
+        import subprocess
         # Determine if we even need custom DNS
         if not categories and not explicit_blocks:
             # Cleanup if they turned it off
             if os.path.exists(conf_file): os.remove(conf_file)
             if os.path.exists(hosts_file): os.remove(hosts_file)
-            await asyncio.create_subprocess_exec("systemctl", "stop", f"ocserv-dns@{group.id}")
+            subprocess.run(["systemctl", "stop", f"ocserv-dns@{group.id}"])
             return
             
         # Download blocklists for categories
@@ -131,11 +132,8 @@ class FirewallService:
                 f.write(f"ipset=/.{base}/{ipset_v4},{ipset_v6}\n")
             
         # Restart the dns service for this group
-        await asyncio.create_subprocess_exec(
-            "systemctl", "restart", f"ocserv-dns@{group.id}", 
-            stdout=asyncio.subprocess.DEVNULL, 
-            stderr=asyncio.subprocess.DEVNULL
-        )
+        subprocess.run(["systemctl", "restart", f"ocserv-dns@{group.id}"], 
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     @classmethod
     async def sync_group(cls, group_id: int, db: AsyncSession):
