@@ -67,6 +67,7 @@ class FirewallService:
     async def setup_group_dns(cls, group: UserGroup):
         """راه‌اندازی میکرو-دی‌ان‌اس برای دسته بندی‌های گروه"""
         categories = group.blocked_categories or []
+        explicit_blocks = group.blocked_domains or []
         
         # Ensure dir exists
         os.makedirs(OCSERV_DNS_DIR, exist_ok=True)
@@ -74,7 +75,7 @@ class FirewallService:
         hosts_file = f"{OCSERV_DNS_DIR}/group_{group.id}.hosts"
         
         # Determine if we even need custom DNS
-        if not categories:
+        if not categories and not explicit_blocks:
             # Cleanup if they turned it off
             if os.path.exists(conf_file): os.remove(conf_file)
             if os.path.exists(hosts_file): os.remove(hosts_file)
@@ -101,14 +102,28 @@ class FirewallService:
             except Exception as e:
                 logger.error(f"Failed to fetch {cat}: {e}")
         
+        # Add Explicitly Blocked Domains from user interface
+        for domain in explicit_blocks:
+            # Block the domain itself
+            domains.add(domain)
+            # And add wildcard conf structure for the domain in dnsmasq
+            try:
+                base_domain = domain.replace('www.', '')
+                domains.add(base_domain)
+            except Exception:
+                pass
+        
         # Write hosts file (Fast resolving)
         with open(hosts_file, "w") as f:
             for domain in domains:
                 f.write(f"0.0.0.0 {domain}\n")
                 
-        # Write additional conf (for any explicit wildcards if needed later)
+        # Write additional conf (for wildcard blocks)
         with open(conf_file, "w") as f:
             f.write(f"# Group {group.name} DNS Config\n")
+            for domain in explicit_blocks:
+                base = domain.replace('www.', '')
+                f.write(f"address=/.{base}/0.0.0.0\n")
             
         # Restart the dns service for this group
         await asyncio.create_subprocess_exec(
@@ -172,14 +187,21 @@ class FirewallService:
             subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "80", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
 
-        # 2. DNS Interception (Categorical Blocks)
+        # 2. DNS Interception (Categorical & Exact Domains)
         categories = group.blocked_categories or []
-        if categories:
+        domains = group.blocked_domains or []
+        
+        if categories or domains:
             port = DNSMASQ_BASE_PORT + group.id
             subprocess.run(["iptables", "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "udp", 
                             "--dport", "53", "-j", "REDIRECT", "--to-ports", str(port)])
             subprocess.run(["iptables", "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "tcp", 
                             "--dport", "53", "-j", "REDIRECT", "--to-ports", str(port)])
+            # Block well-known DoH (DNS-over-HTTPS) providers to prevent bypass
+            doh_ips = ["8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112"]
+            for dip in doh_ips:
+                subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-d", dip, "-p", "tcp", "--dport", "443", "-j", "DROP"])
+                subprocess.run(["iptables", "-I", "FORWARD", "-s", vpn_ip, "-d", dip, "-p", "udp", "--dport", "443", "-j", "DROP"])
         else:
             # Force them to use our global DNS (prevent bypass using DoH/Custom DNS)
             subprocess.run(["iptables", "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "udp", 
