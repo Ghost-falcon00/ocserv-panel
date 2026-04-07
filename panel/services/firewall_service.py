@@ -129,6 +129,23 @@ class FirewallService:
         # Write additional conf (for wildcard blocks & IPSet auto-population)
         with open(conf_file, "w") as f:
             f.write(f"# Group {group.name} DNS Config\n")
+            
+            # --- Dynamic Upstream DNS for Categories ---
+            # Default DNS (fastest)
+            upstream_dns = ["1.1.1.1", "8.8.8.8"]
+            
+            categories = group.blocked_categories or []
+            if "porn" in categories or "malware" in categories:
+                # Cloudflare Family (Malware & Porn Blocking)
+                upstream_dns = ["1.1.1.3", "1.0.0.3"]
+            if "ads" in categories:
+                # AdGuard DNS (Ads, Tracker, Malware blocking) - Overrides CF if both checked
+                upstream_dns = ["94.140.14.14", "94.140.15.15"]
+                
+            for server in upstream_dns:
+                f.write(f"server={server}\n")
+            # ---------------------------------------------
+            
             # Auto-populate the groups explicit IPSet from DNSmasq
             ipset_v4 = f"ocserv_g_{group.id}_net"
             ipset_v6 = f"ocserv_g_{group.id}_net_v6"

@@ -51,12 +51,27 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 
-# Inject Hooks into OCServ Configuration (Replace old ones if present)
 if grep -q "^connect-script" /etc/ocserv/ocserv.conf; then
     sed -i 's|^connect-script.*|connect-script = /opt/ocserv-panel/scripts/on_connect.py|g' /etc/ocserv/ocserv.conf
 else
     echo "connect-script = /opt/ocserv-panel/scripts/on_connect.py" >> /etc/ocserv/ocserv.conf
 fi
+
+# Ensure DNS systemd unit doesn't hardcode servers (so Category DNS works)
+cat > /etc/systemd/system/ocserv-dns@.service << 'EOF'
+[Unit]
+Description=OCServ per-group DNS for Group %I
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --no-daemon --port=5300%i --conf-file=/etc/ocserv/dns/group_%i.conf --addn-hosts=/etc/ocserv/dns/group_%i.hosts
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
 
 if grep -q "^disconnect-script" /etc/ocserv/ocserv.conf; then
     sed -i 's|^disconnect-script.*|disconnect-script = /opt/ocserv-panel/scripts/on_disconnect.py|g' /etc/ocserv/ocserv.conf

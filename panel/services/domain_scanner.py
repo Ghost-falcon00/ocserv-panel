@@ -30,6 +30,24 @@ SMART_ALIASES = {
     "tiktok": ["tiktokcdn.com", "byteoversea.com", "ibytedtos.com"]
 }
 
+# Explicit Subnet injections for Apps that don't use DNS (MTProto, etc.)
+STATIC_SUBNETS = {
+    "telegram": [
+        "91.108.4.0/22", 
+        "149.154.160.0/20", 
+        "185.76.151.0/24", 
+        "91.108.8.0/22",
+        "91.108.12.0/22",
+        "91.108.56.0/22",
+        "149.154.164.0/22",
+        "149.154.168.0/22",
+        "109.239.140.0/24",
+        "2001:b28:f23d::/48",
+        "2001:b28:f23f::/48",
+        "2001:67c:4e8::/48"
+    ]
+}
+
 class DomainScanner:
     """
     Background worker that actively scans and resolves domains to IPv4/IPv6 addresses
@@ -78,6 +96,13 @@ class DomainScanner:
                         if key in clean_domain:
                             domains_to_scan.extend(aliases)
                     
+                    # --- Subnet Injection for MTProto/Non-DNS apps ---
+                    for key, subnets in STATIC_SUBNETS.items():
+                        if key in clean_domain:
+                            for static_sub in subnets:
+                                target_ips.add(f"STATIC_SUBNET:{static_sub}")
+                    # ---------------------------------------------------
+                    
                     for target_dom in set(domains_to_scan):
                         for sub in COMMON_SUBDOMAINS:
                             target = f"{sub}.{target_dom}" if sub else target_dom
@@ -114,6 +139,13 @@ class DomainScanner:
                     if key in clean_domain:
                         domains_to_scan.extend(aliases)
                 
+                # --- Subnet Injection for MTProto/Non-DNS apps ---
+                for key, subnets in STATIC_SUBNETS.items():
+                    if key in clean_domain:
+                        for static_sub in subnets:
+                            target_ips.add(f"STATIC_SUBNET:{static_sub}")
+                # ---------------------------------------------------
+                
                 for target_dom in set(domains_to_scan):
                     for sub in COMMON_SUBDOMAINS:
                         target = f"{sub}.{target_dom}" if sub else target_dom
@@ -145,8 +177,21 @@ class DomainScanner:
         # 2. Add IPs as subnets
         for ip in ips:
             try:
+                # Direct Static Subnet injection (from Telegram etc)
+                if ip.startswith("STATIC_SUBNET:"):
+                    raw_subnet = ip.split(":", 1)[1]
+                    if ":" in raw_subnet: # IPv6 static
+                        logger.info(f"DomainScanner: [Banning] Adding STATIC IPv6 Subnet: {raw_subnet}")
+                        subprocess.run([CMD_IPSET, "add", f"{set_name}_v6", raw_subnet, "-exist"], 
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else: # IPv4 static
+                        logger.info(f"DomainScanner: [Banning] Adding STATIC IPv4 Subnet: {raw_subnet}")
+                        subprocess.run([CMD_IPSET, "add", set_name, raw_subnet, "-exist"], 
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    continue
+
                 if ":" in ip:
-                    # IPv6: Expand to /64 subnet carefully computing base address
+                    # IPv6: Expand dynamically scanned IP to /64 subnet
                     net = ipaddress.ip_network(f"{ip}/64", strict=False)
                     subnet = str(net)
                     logger.info(f"DomainScanner: [Banning] Adding IPv6 Subnet to IPSet: {subnet}")
