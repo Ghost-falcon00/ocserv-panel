@@ -19,6 +19,17 @@ COMMON_SUBDOMAINS = [
     "b.i", "i", "scontent", "cdn", "m", "developer"
 ]
 
+# Associated CDNs for popular services to prevent media/video bypass
+SMART_ALIASES = {
+    "instagram": ["cdninstagram.com", "fbcdn.net"],
+    "youtube": ["googlevideo.com", "ytimg.com", "ggpht.com"],
+    "facebook": ["fbcdn.net", "fbsbx.com"],
+    "twitter": ["twimg.com"],
+    "twitch": ["ttvnw.net", "jtvnw.net"],
+    "netflix": ["nflxvideo.net", "nflximg.net", "nflxext.com"],
+    "tiktok": ["tiktokcdn.com", "byteoversea.com", "ibytedtos.com"]
+}
+
 class DomainScanner:
     """
     Background worker that actively scans and resolves domains to IPv4/IPv6 addresses
@@ -62,10 +73,16 @@ class DomainScanner:
                     clean_domain = root_domain.strip().replace("www.", "")
                     if not clean_domain: continue
                     
-                    for sub in COMMON_SUBDOMAINS:
-                        target = f"{sub}.{clean_domain}" if sub else clean_domain
-                        resolved = await cls.resolve_domain(target)
-                        target_ips.update(resolved)
+                    domains_to_scan = [clean_domain]
+                    for key, aliases in SMART_ALIASES.items():
+                        if key in clean_domain:
+                            domains_to_scan.extend(aliases)
+                    
+                    for target_dom in set(domains_to_scan):
+                        for sub in COMMON_SUBDOMAINS:
+                            target = f"{sub}.{target_dom}" if sub else target_dom
+                            resolved = await cls.resolve_domain(target)
+                            target_ips.update(resolved)
                         
                 if target_ips:
                     logger.info(f"DomainScanner: Found {len(target_ips)} IPs for Group {group.name}")
@@ -90,9 +107,15 @@ class DomainScanner:
                 clean_domain = root_domain.strip().replace("www.", "")
                 if not clean_domain: continue
                 
-                for sub in COMMON_SUBDOMAINS:
-                    target = f"{sub}.{clean_domain}" if sub else clean_domain
-                    target_ips.update(await cls.resolve_domain(target))
+                domains_to_scan = [clean_domain]
+                for key, aliases in SMART_ALIASES.items():
+                    if key in clean_domain:
+                        domains_to_scan.extend(aliases)
+                
+                for target_dom in set(domains_to_scan):
+                    for sub in COMMON_SUBDOMAINS:
+                        target = f"{sub}.{target_dom}" if sub else target_dom
+                        target_ips.update(await cls.resolve_domain(target))
                     
             if target_ips:
                 await cls.sync_group_ipset(group.id, target_ips)
