@@ -255,7 +255,7 @@
                         <div class="progress-fill ${user.traffic_percent > 80 ? 'warning' : ''} ${user.traffic_percent > 95 ? 'danger' : ''}" 
                              style="width: ${Math.min(100, user.traffic_percent)}%"></div>
                     </div>
-                    <span class="traffic-text">
+                    <span class="traffic-text" dir="ltr">
                         ${formatBytes(user.used_traffic)} / ${user.max_traffic > 0 ? formatBytes(user.max_traffic) : '∞'}
                     </span>
                     ${user.reset_period_type ? `<span class="traffic-text" style="font-size:0.7rem;">${ {
@@ -415,7 +415,7 @@
         data.expire_days = expireDays;
 
         const groupId = document.getElementById('user-group').value;
-        data.group_id = groupId ? parseInt(groupId) : null;
+        data.group_id = groupId ? parseInt(groupId) : 0;
 
         data.reset_period_type = document.getElementById('user-reset-type').value;
 

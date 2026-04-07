@@ -104,8 +104,8 @@ class TrafficService:
                 # ═══════════════════════════════════════════════════════════
                 if not user.first_connection:
                     from datetime import timedelta
-                    user.first_connection = datetime.now()
-                    user.last_connection = datetime.now()
+                    user.first_connection = datetime.utcnow()
+                    user.last_connection = datetime.utcnow()
                     
                     # Log first connection
                     client_ip = connections[0].get('client_ip', 'unknown') if connections else 'unknown'
@@ -137,7 +137,7 @@ class TrafficService:
                     delta_total = delta_rx + delta_tx
                     
                     # Calculate speed (bytes per second)
-                    time_diff = (datetime.now() - last.get('time', datetime.now())).total_seconds()
+                    time_diff = (datetime.utcnow() - last.get('time', datetime.utcnow())).total_seconds()
                     if time_diff > 1:  # At least 1 second
                         speed_rx = delta_rx / time_diff
                         speed_tx = delta_tx / time_diff
@@ -180,7 +180,7 @@ class TrafficService:
                 self._last_traffic[username] = {
                     'rx': current_rx, 
                     'tx': current_tx, 
-                    'time': datetime.now(),
+                    'time': datetime.utcnow(),
                     'rx_speed': speed_rx,
                     'tx_speed': speed_tx
                 }
@@ -243,12 +243,12 @@ class TrafficService:
                 client_ip=client_ip,
                 vpn_ip=vpn_ip,
                 user_agent=user_agent,
-                connected_at=datetime.now()
+                connected_at=datetime.utcnow()
             )
             session.add(log)
             
             # Update user stats
-            user.last_connection = datetime.now()
+            user.last_connection = datetime.utcnow()
             user.total_connections += 1
             user.is_online = True
             user.current_connections += 1
@@ -280,7 +280,7 @@ class TrafficService:
             log = result.scalar_one_or_none()
             
             if log:
-                log.disconnected_at = datetime.now()
+                log.disconnected_at = datetime.utcnow()
                 log.disconnect_reason = reason
                 log.traffic_in = traffic_in
                 log.traffic_out = traffic_out

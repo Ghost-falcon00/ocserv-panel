@@ -12,12 +12,15 @@ from models.system_metric import SystemMetric
 
 logger = logging.getLogger(__name__)
 
+# Initialize CPU tracking so interval=None works accurately
+psutil.cpu_percent(interval=None)
+
 class SystemMonitorService:
     async def collect_metrics(self, session: AsyncSession):
         """جمع‌آوری و ذخیره متریک‌های فعلی"""
         try:
-            # CPU (interval 0.1 to get actual usage instead of since last call globally)
-            cpu = psutil.cpu_percent(interval=0.1)
+            # CPU (interval None = non-blocking, returns since last call)
+            cpu = psutil.cpu_percent(interval=None)
             
             # RAM
             mem = psutil.virtual_memory()
@@ -51,7 +54,7 @@ class SystemMonitorService:
             mem = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             return {
-                "cpu_percent": psutil.cpu_percent(interval=0.1),
+                "cpu_percent": psutil.cpu_percent(interval=None),
                 "ram_percent": mem.percent,
                 "ram_used": mem.used,
                 "ram_total": mem.total,
