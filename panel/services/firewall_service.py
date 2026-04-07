@@ -189,6 +189,7 @@ class FirewallService:
         
         # Block Subnets in the IPSet
         subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-m", "set", "--match-set", ipset_v4, "dst", "-j", "DROP"])
+        subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-m", "set", "--match-set", ipset_v4, "dst", "-m", "limit", "--limit", "2/sec", "-j", "LOG", "--log-prefix", "FW_IPSET_DROP: "])
         # (Assuming IPv6 isn't heavily used in OCServ yet, but if it is, ip6tables should be used)
         
         # 1.5. Explicit domain string matches (Legacy DPI fallback)
@@ -200,6 +201,7 @@ class FirewallService:
         if blocked_domains:
             # Drop all QUIC traffic for evasion-prevention
             subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", "-j", "DROP"])
+            subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", "-m", "limit", "--limit", "2/sec", "-j", "LOG", "--log-prefix", "FW_QUIC_DROP: "])
             
         for domain in blocked_domains:
             # Extract core keyword for DPI (e.g. "instagram.com" -> "instagram")
@@ -214,6 +216,8 @@ class FirewallService:
             # Block HTTPS (TCP 443) -> Kills SNI (this now catches everything due to QUIC drop above)
             subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "443", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
+            subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "443", 
+                            "-m", "string", "--string", keyword, "--algo", "bm", "-m", "limit", "--limit", "2/sec", "-j", "LOG", "--log-prefix", "FW_DPI_DROP: "])
             # Block HTTP (TCP 80)
             subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "80", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])

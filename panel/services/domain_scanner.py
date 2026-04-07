@@ -131,6 +131,7 @@ class DomainScanner:
     async def sync_group_ipset(cls, group_id: int, ips: Set[str]):
         """Creates/Updates the Linux IPSet with the scanned IPs (Expanded to Subnets)"""
         import subprocess
+        import ipaddress
         
         # We use a new name to avoid conflict with old hash:ip sets
         set_name = f"ocserv_g_{group_id}_net"
@@ -143,18 +144,23 @@ class DomainScanner:
         
         # 2. Add IPs as subnets
         for ip in ips:
-            if ":" in ip:
-                # IPv6: Expand to /64 subnet
-                subnet = f"{ip}/64"
-                logger.info(f"DomainScanner: [Banning] Adding IPv6 Subnet to IPSet: {subnet}")
-                subprocess.run([CMD_IPSET, "add", f"{set_name}_v6", subnet, "-exist"], 
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            else:
-                # IPv4: Expand to /24 subnet (blocks 256 localized servers at once)
-                subnet = f"{ip}/24"
-                logger.info(f"DomainScanner: [Banning] Adding IPv4 Subnet to IPSet: {subnet}")
-                subprocess.run([CMD_IPSET, "add", set_name, subnet, "-exist"], 
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                if ":" in ip:
+                    # IPv6: Expand to /64 subnet carefully computing base address
+                    net = ipaddress.ip_network(f"{ip}/64", strict=False)
+                    subnet = str(net)
+                    logger.info(f"DomainScanner: [Banning] Adding IPv6 Subnet to IPSet: {subnet}")
+                    subprocess.run([CMD_IPSET, "add", f"{set_name}_v6", subnet, "-exist"], 
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    # IPv4: Expand to /24 subnet (blocks 256 localized servers at once properly mapping base net)
+                    net = ipaddress.ip_network(f"{ip}/24", strict=False)
+                    subnet = str(net)
+                    logger.info(f"DomainScanner: [Banning] Adding IPv4 Subnet to IPSet: {subnet}")
+                    subprocess.run([CMD_IPSET, "add", set_name, subnet, "-exist"], 
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception as e:
+                logger.error(f"DomainScanner: Error formatting subnet for {ip} - {e}")
 
     @classmethod
     async def start_background_loop(cls, interval_seconds: int = 600):
