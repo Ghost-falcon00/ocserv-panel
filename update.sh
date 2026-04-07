@@ -65,7 +65,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/dnsmasq --no-daemon --port=5300%i --conf-file=/etc/ocserv/dns/group_%i.conf --addn-hosts=/etc/ocserv/dns/group_%i.hosts
+ExecStart=/usr/sbin/dnsmasq --no-daemon --no-resolv --port=5300%i --conf-file=/etc/ocserv/dns/group_%i.conf --addn-hosts=/etc/ocserv/dns/group_%i.hosts
 Restart=always
 
 [Install]
