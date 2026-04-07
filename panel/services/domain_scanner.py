@@ -208,8 +208,8 @@ class DomainScanner:
                 logger.error(f"DomainScanner: Error formatting subnet for {ip} - {e}")
 
     @classmethod
-    async def start_background_loop(cls, interval_seconds: int = 600):
-        """Runs the scanner periodically (default: 10 minutes)"""
+    async def start_background_loop(cls, interval_seconds: int = 120):
+        """Runs the scanner constantly (default: 2 minutes)"""
         # Sleep initially to let the server startup cleanly
         await asyncio.sleep(10)
         while True:

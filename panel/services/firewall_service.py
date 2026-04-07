@@ -147,11 +147,15 @@ class FirewallService:
             # ---------------------------------------------
             
             # Auto-populate the groups explicit IPSet from DNSmasq
+            # TRANSPARENT HARVESTING MODE:
+            # We no longer spoof 0.0.0.0. We let DNSMasq resolve the true IP.
+            # Why? Because if an App gets 0.0.0.0, it instantly detects blocking and activates bypass.
+            # If it gets the true IP, it wastes time trying to connect to it, while DNSMasq
+            # has silently harvested that IP and injected it into the IPTables IPSet to drop the connection!
             ipset_v4 = f"ocserv_g_{group.id}_net"
             ipset_v6 = f"ocserv_g_{group.id}_net_v6"
             for domain in explicit_blocks:
                 base = domain.replace('www.', '')
-                f.write(f"address=/.{base}/0.0.0.0\n")
                 f.write(f"ipset=/.{base}/{ipset_v4},{ipset_v6}\n")
             
         # Restart the dns service for this group
