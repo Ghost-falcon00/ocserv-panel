@@ -360,6 +360,7 @@ async def disconnect_user(
     if success:
         user.is_online = False
         user.current_connections = 0
+        user.last_connection = datetime.utcnow()
         await db.commit()
         return {"message": f"اتصال کاربر {user.username} قطع شد"}
     else:

@@ -291,7 +291,8 @@ class TrafficService:
                 .where(User.username == username)
                 .values(
                     current_connections=User.current_connections - 1,
-                    is_online=False
+                    is_online=False,
+                    last_connection=datetime.utcnow()
                 )
             )
             await session.execute(stmt)
