@@ -123,27 +123,24 @@ class FirewallService:
         
         # Write hosts file (Fast resolving)
         with open(hosts_file, "w") as f:
+            # We ONLY write 0.0.0.0 for explicitly blocked domains in the hosts file.
+            # (Transparent Harvest handles the IPSet part, but hosts handles the immediate DNS drop if we want it)
+            # Actually, to align with Transparent Harvesting, we SHOULD NOT use 0.0.0.0 for user domains anymore!
+            # So we only write the downloaded Category domains here which are basically infinite lists of 
+            # 0.0.0.0 sinks.
             for domain in domains:
-                f.write(f"0.0.0.0 {domain}\n")
+                # If domain is in explicit_blocks, skip writing it to 0.0.0.0 so we can trace it via IPSet
+                if domain not in explicit_blocks:
+                    f.write(f"0.0.0.0 {domain}\n")
                 
         # Write additional conf (for wildcard blocks & IPSet auto-population)
         with open(conf_file, "w") as f:
             f.write(f"# Group {group.name} DNS Config\n")
             
             # --- Dynamic Upstream DNS for Categories ---
-            # Default DNS (fastest)
-            upstream_dns = ["1.1.1.1", "8.8.8.8"]
-            
-            categories = group.blocked_categories or []
-            if "porn" in categories or "malware" in categories:
-                # Cloudflare Family (Malware & Porn Blocking)
-                upstream_dns = ["1.1.1.3", "1.0.0.3"]
-            if "ads" in categories:
-                # AdGuard DNS (Ads, Tracker, Malware blocking) - Overrides CF if both checked
-                upstream_dns = ["94.140.14.14", "94.140.15.15"]
-                
-            for server in upstream_dns:
-                f.write(f"server={server}\n")
+            # Default DNS for normal queries (fastest)
+            f.write("server=1.1.1.1\n")
+            f.write("server=8.8.8.8\n")
             # ---------------------------------------------
             
             # Auto-populate the groups explicit IPSet from DNSmasq
