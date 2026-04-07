@@ -82,10 +82,12 @@ class DomainScanner:
                         for sub in COMMON_SUBDOMAINS:
                             target = f"{sub}.{target_dom}" if sub else target_dom
                             resolved = await cls.resolve_domain(target)
-                            target_ips.update(resolved)
+                            if resolved:
+                                logger.info(f"DomainScanner: [Discovery] Found {target} -> {resolved}")
+                                target_ips.update(resolved)
                         
                 if target_ips:
-                    logger.info(f"DomainScanner: Found {len(target_ips)} IPs for Group {group.name}")
+                    logger.info(f"DomainScanner: [Ban Prepare] Aggregated {len(target_ips)} IPs for Group {group.name} to ban.")
                 
                 
                 # 2. Inject into IPSet
@@ -144,11 +146,13 @@ class DomainScanner:
             if ":" in ip:
                 # IPv6: Expand to /64 subnet
                 subnet = f"{ip}/64"
+                logger.info(f"DomainScanner: [Banning] Adding IPv6 Subnet to IPSet: {subnet}")
                 subprocess.run([CMD_IPSET, "add", f"{set_name}_v6", subnet, "-exist"], 
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 # IPv4: Expand to /24 subnet (blocks 256 localized servers at once)
                 subnet = f"{ip}/24"
+                logger.info(f"DomainScanner: [Banning] Adding IPv4 Subnet to IPSet: {subnet}")
                 subprocess.run([CMD_IPSET, "add", set_name, subnet, "-exist"], 
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
