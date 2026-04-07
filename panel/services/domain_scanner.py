@@ -13,15 +13,15 @@ logger = logging.getLogger("uvicorn.error")
 
 CMD_IPSET = shutil.which("ipset") or "/sbin/ipset"
 
-# Common proxy subdomains used by apps to bypass SNI/DNS
+# Common proxy subdomains used by apps
 COMMON_SUBDOMAINS = [
     "", "www", "api", "graph", "mqtt", "chat", "edge-chat", "edge", 
-    "b.i", "i", "scontent", "cdn", "m", "developer"
+    "b.i", "i", "scontent", "cdn", "m", "developer", "b-api", "b-graph", "ig"
 ]
 
 # Associated CDNs for popular services to prevent media/video bypass
 SMART_ALIASES = {
-    "instagram": ["cdninstagram.com", "fbcdn.net"],
+    "instagram": ["cdninstagram.com", "fbcdn.net", "instagram.fna.fbcdn.net"],
     "youtube": ["googlevideo.com", "ytimg.com", "ggpht.com"],
     "facebook": ["fbcdn.net", "fbsbx.com"],
     "twitter": ["twimg.com"],
@@ -157,8 +157,8 @@ class DomainScanner:
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     @classmethod
-    async def start_background_loop(cls, interval_seconds: int = 10800):
-        """Runs the scanner periodically (default: 3 hours)"""
+    async def start_background_loop(cls, interval_seconds: int = 600):
+        """Runs the scanner periodically (default: 10 minutes)"""
         # Sleep initially to let the server startup cleanly
         await asyncio.sleep(10)
         while True:
