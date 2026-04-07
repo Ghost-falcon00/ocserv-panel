@@ -47,13 +47,39 @@ STATIC_SUBNETS = {
         "2001:67c:4e8::/48"
     ]
 }
+import json
+import os
+
+HARVEST_FILE = "harvested_ips.json"
 
 class DomainScanner:
     """
     Background worker that actively scans and resolves domains to IPv4/IPv6 addresses
     and continually feeds them into the Linux Kernel IPSet for each group.
     """
-    
+    _harvest_cache = {}
+    _harvest_loaded = False
+
+    @classmethod
+    def get_harvest(cls):
+        if not cls._harvest_loaded:
+            if os.path.exists(HARVEST_FILE):
+                try:
+                    with open(HARVEST_FILE, "r") as f:
+                        cls._harvest_cache = json.load(f)
+                except:
+                    cls._harvest_cache = {}
+            cls._harvest_loaded = True
+        return cls._harvest_cache
+
+    @classmethod
+    def save_harvest(cls):
+        try:
+            with open(HARVEST_FILE, "w") as f:
+                json.dump(cls._harvest_cache, f)
+        except Exception as e:
+            logger.error(f"Error saving harvested IPs: {e}")
+
     @staticmethod
     async def resolve_domain(domain: str) -> Set[str]:
         """Resolves a domain name to a set of IP addresses."""
@@ -103,16 +129,34 @@ class DomainScanner:
                                 target_ips.add(f"STATIC_SUBNET:{static_sub}")
                     # ---------------------------------------------------
                     
+                    
+                    harvest_data = cls.get_harvest()
+                    has_new_harvest = False
+                    
                     for target_dom in set(domains_to_scan):
                         for sub in COMMON_SUBDOMAINS:
                             target = f"{sub}.{target_dom}" if sub else target_dom
                             resolved = await cls.resolve_domain(target)
+                            
+                            # Grab persistent memory IPs
+                            if target in harvest_data:
+                                target_ips.update(harvest_data[target])
+                                
                             if resolved:
                                 logger.info(f"DomainScanner: [Discovery] Found {target} -> {resolved}")
                                 target_ips.update(resolved)
+                                
+                                # Store new IPs to persistence
+                                current_stored = set(harvest_data.get(target, []))
+                                if not current_stored.issuperset(resolved):
+                                    harvest_data[target] = list(current_stored.union(resolved))
+                                    has_new_harvest = True
+                    
+                    if has_new_harvest:
+                        cls.save_harvest()
                         
                 if target_ips:
-                    logger.info(f"DomainScanner: [Ban Prepare] Aggregated {len(target_ips)} IPs for Group {group.name} to ban.")
+                    logger.info(f"DomainScanner: [Ban] Aggregated {len(target_ips)} Subnets for Group {group.name}.")
                 
                 
                 # 2. Inject into IPSet
@@ -145,11 +189,26 @@ class DomainScanner:
                         for static_sub in subnets:
                             target_ips.add(f"STATIC_SUBNET:{static_sub}")
                 # ---------------------------------------------------
+                harvest_data = cls.get_harvest()
+                has_new_harvest = False
                 
                 for target_dom in set(domains_to_scan):
                     for sub in COMMON_SUBDOMAINS:
                         target = f"{sub}.{target_dom}" if sub else target_dom
-                        target_ips.update(await cls.resolve_domain(target))
+                        resolved = await cls.resolve_domain(target)
+                        
+                        if target in harvest_data:
+                            target_ips.update(harvest_data[target])
+                            
+                        if resolved:
+                            target_ips.update(resolved)
+                            current_stored = set(harvest_data.get(target, []))
+                            if not current_stored.issuperset(resolved):
+                                harvest_data[target] = list(current_stored.union(resolved))
+                                has_new_harvest = True
+                
+                if has_new_harvest:
+                    cls.save_harvest()
                     
             if target_ips:
                 await cls.sync_group_ipset(group.id, target_ips)
@@ -208,7 +267,7 @@ class DomainScanner:
                 logger.error(f"DomainScanner: Error formatting subnet for {ip} - {e}")
 
     @classmethod
-    async def start_background_loop(cls, interval_seconds: int = 120):
+    async def start_background_loop(cls, interval_seconds: int = 10):
         """Runs the scanner constantly (default: 2 minutes)"""
         # Sleep initially to let the server startup cleanly
         await asyncio.sleep(10)

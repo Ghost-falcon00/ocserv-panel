@@ -137,15 +137,24 @@ function formatBytes(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function parseServerDate(dateStr) {
+    if (!dateStr) return null;
+    // Assuming backend returns UTC datetimes without timezone offset
+    if (!dateStr.endsWith('Z') && !dateStr.includes('+') && dateStr.includes('T')) {
+        dateStr += 'Z';
+    }
+    return new Date(dateStr);
+}
+
 function formatDate(dateStr) {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
+    const date = parseServerDate(dateStr);
     return date.toLocaleDateString('fa-IR');
 }
 
 function formatTime(dateStr) {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
+    const date = parseServerDate(dateStr);
     return date.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
 }
 

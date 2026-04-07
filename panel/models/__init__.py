@@ -8,6 +8,7 @@ from .group import UserGroup
 from .user import User, SubscriptionPlan
 from .admin import Admin
 from .connection_log import ConnectionLog
+from .system_metric import SystemMetric
 from .settings import SystemSettings, SETTING_CATEGORIES
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "SubscriptionPlan",
     "Admin",
     "ConnectionLog",
+    "SystemMetric",
     "SystemSettings",
     "SETTING_CATEGORIES"
 ]

@@ -20,6 +20,7 @@ from models.database import init_db, async_session
 from models.admin import Admin
 from services.traffic import traffic_service
 from services.quota import quota_service
+from services.system_monitor import monitor_service
 from services.domain_scanner import DomainScanner
 from api import (
     auth_router,
@@ -58,6 +59,11 @@ async def connection_limit_task():
     """Task to check per-user connection limits"""
     await quota_service.check_connection_limits()
 
+
+async def system_monitor_task():
+    """Task to collect system resources"""
+    async with async_session() as session:
+        await monitor_service.collect_metrics(session)
 
 async def create_default_admin():
     """Create default admin if not exists"""
@@ -110,6 +116,12 @@ async def lifespan(app: FastAPI):
         'interval',
         seconds=30,  # Check every 30 seconds
         id='connection_limit'
+    )
+    scheduler.add_job(
+        system_monitor_task,
+        'interval',
+        minutes=5,  # Collect metrics every 5 minutes
+        id='system_monitor'
     )
     scheduler.start()
     logger.info("Scheduler started")

@@ -280,13 +280,22 @@ async def update_user(
             await ocserv_service.lock_user(user.username)
     if user_data.note is not None:
         user.note = user_data.note
+    group_changed = False
     if user_data.group_id is not None:
-        user.group_id = user_data.group_id if user_data.group_id != 0 else None
+        new_group_id = user_data.group_id if user_data.group_id != 0 else None
+        if user.group_id != new_group_id:
+            user.group_id = new_group_id
+            group_changed = True
+            
     if user_data.reset_period_type is not None:
         user.reset_period_type = user_data.reset_period_type
     
     await db.commit()
     await db.refresh(user)
+    
+    # Instantaneous Firewall tracking: If group changed and user is online, disconnect them to force openconnect to re-authenticate and apply the new group's DNS/Firewall rules immediately (auto-reconnects in 2s).
+    if group_changed and user.is_online:
+        await ocserv_service.disconnect_user(user.username)
     
     # Reload with relationships
     from sqlalchemy.orm import selectinload
@@ -358,6 +367,29 @@ async def disconnect_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="خطا در قطع اتصال"
         )
+
+
+@router.post("/{user_id}/reset-traffic")
+async def reset_user_traffic(
+    user_id: int,
+    current_admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """ریست کردن ترافیک مصرفی کاربر به صفر"""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    
+    if user.used_traffic >= user.max_traffic and user.max_traffic > 0:
+        await ocserv_service.unlock_user(user.username)
+        user.is_active = True
+        
+    user.reset_traffic()
+    await db.commit()
+    
+    return {"message": f"ترافیک مصرفی {user.username} با موفقیت صفر شد"}
 
 
 @router.post("/{user_id}/reset-quota")

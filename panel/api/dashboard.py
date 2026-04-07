@@ -14,7 +14,9 @@ from models.database import get_db
 from models.admin import Admin
 from models.user import User
 from models.connection_log import ConnectionLog
+from models.system_metric import SystemMetric
 from services.ocserv import ocserv_service
+from services.system_monitor import monitor_service
 from api.auth import get_current_admin
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
@@ -225,6 +227,32 @@ async def get_server_status(
         uptime=status.get("uptime", ""),
         version=status.get("version", "")
     )
+
+
+@router.get("/system-resources")
+async def get_system_resources(
+    current_admin: Admin = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    دریافت وضعیت فعلی منابع سرور و تاریخچه ۲۴ ساعته
+    """
+    # 1. Live Stats
+    live = await monitor_service.get_latest_metrics()
+    
+    # 2. History Stats (last 24h, downsampled if too many)
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    result = await db.execute(
+        select(SystemMetric)
+        .where(SystemMetric.timestamp >= cutoff)
+        .order_by(SystemMetric.timestamp.asc())
+    )
+    metrics = result.scalars().all()
+    
+    return {
+        "live": live,
+        "history": [m.to_dict() for m in metrics]
+    }
 
 
 @router.get("/traffic-chart", response_model=TrafficChartData)

@@ -154,9 +154,14 @@
                 <textarea id="user-note" rows="2"></textarea>
             </div>
 
-            <div class="modal-footer">
-                <button type="submit" class="btn btn-primary">ذخیره</button>
-                <button type="button" class="btn btn-secondary" onclick="closeModal()">انصراف</button>
+            <div class="modal-footer" style="justify-content: space-between; display: flex;">
+                <div>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">انصراف</button>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn" style="background: var(--danger); color: white; display: none;" id="btn-reset-traffic" onclick="resetUserTraffic()">ریست مصرف</button>
+                    <button type="submit" class="btn btn-primary">ذخیره</button>
+                </div>
             </div>
         </form>
     </div>
@@ -276,7 +281,7 @@
                         </svg>
                     </button>
                     ${user.is_online ? `
-                        <button class="btn-icon warning" onclick="disconnectUser(${user.id})" title="قطع اتصال">
+                        <button class="btn-icon warning" onclick="disconnectUser(${user.id}, '${user.username}')" title="قطع اتصال">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="18" y1="6" x2="6" y2="18"/>
                                 <line x1="6" y1="6" x2="18" y2="18"/>
@@ -330,7 +335,7 @@
 
     function formatTimeAgo(dateStr) {
         if (!dateStr) return '';
-        const date = new Date(dateStr);
+        const date = typeof parseServerDate === 'function' ? parseServerDate(dateStr) : new Date(dateStr);
         const now = new Date();
         const diff = now - date;
 
@@ -354,6 +359,7 @@
         document.getElementById('user-password').required = true;
         document.getElementById('user-active').checked = true;
         document.getElementById('user-days').value = 30;
+        document.getElementById('btn-reset-traffic').style.display = 'none';
         document.getElementById('user-modal').classList.add('active');
     }
 
@@ -368,12 +374,10 @@
             document.getElementById('user-password').value = '';
             document.getElementById('user-password').required = false;
 
-            // Convert traffic to GB
             const trafficGB = user.max_traffic / 1073741824;
             document.getElementById('user-traffic').value = trafficGB;
             document.getElementById('traffic-unit').value = '1073741824';
 
-            // Use expire_days from DB directly (not calculated from remaining)
             document.getElementById('user-days').value = user.expire_days || 0;
 
             document.getElementById('user-connections').value = user.max_connections;
@@ -382,6 +386,7 @@
             document.getElementById('user-group').value = user.group_id || '';
             document.getElementById('user-reset-type').value = user.reset_period_type || 'monthly';
 
+            document.getElementById('btn-reset-traffic').style.display = 'block';
             document.getElementById('user-modal').classList.add('active');
         } catch (error) {
             showToast('خطا در دریافت اطلاعات کاربر', 'error');
@@ -406,15 +411,12 @@
         const password = document.getElementById('user-password').value;
         if (password) data.password = password;
 
-        // Send expire_days instead of expire_date
         const expireDays = parseInt(document.getElementById('user-days').value) || 0;
         data.expire_days = expireDays;
 
-        // Group
         const groupId = document.getElementById('user-group').value;
         data.group_id = groupId ? parseInt(groupId) : null;
 
-        // Reset period type
         data.reset_period_type = document.getElementById('user-reset-type').value;
 
         try {
@@ -445,13 +447,32 @@
         }
     }
 
-    async function disconnectUser(id) {
+    async function disconnectUser(id, username) {
+        if (!confirm(`آیا از قطع اتصال کاربر ${username} مطمئن هستید؟`)) return;
+
         try {
             await apiPost(`/api/users/${id}/disconnect`);
-            showToast('اتصال کاربر قطع شد', 'success');
-            loadUsers();
+            showToast('درخواست قطع اتصال ارسال شد', 'success');
+            setTimeout(loadUsers, 2000);
         } catch (error) {
             showToast('خطا در قطع اتصال', 'error');
+        }
+    }
+
+    async function resetUserTraffic() {
+        const id = document.getElementById('user-id').value;
+        const username = document.getElementById('user-username').value;
+        if (!id) return;
+        
+        if (!confirm(`آیا از صفر کردن ترافیک مصرفی ${username} مطمئن هستید؟`)) return;
+
+        try {
+            await apiPost(`/api/users/${id}/reset-traffic`);
+            showToast('ترافیک مصرفی با موفقیت صفر شد', 'success');
+            closeModal();
+            loadUsers();
+        } catch (error) {
+            showToast('خطا در ریست ترافیک', 'error');
         }
     }
 

@@ -47,6 +47,18 @@
         </div>
 
         <div class="stat-card">
+            <div class="stat-icon traffic" style="color: #10b981; background: rgba(16, 185, 129, 0.1);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+            </div>
+            <div class="stat-content">
+                <span class="stat-value" id="total-traffic">-</span>
+                <span class="stat-label">ترافیک کل</span>
+            </div>
+        </div>
+
+        <div class="stat-card">
             <div class="stat-icon connections">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
@@ -56,6 +68,26 @@
             <div class="stat-content">
                 <span class="stat-value" id="today-connections">-</span>
                 <span class="stat-label">اتصالات امروز</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Resources (NEW) -->
+    <div class="sys-resources-wrapper">
+        <div class="sys-grid">
+            <div class="sys-meter">
+                <div class="sys-dial" id="cpu-dial" style="--val: 0%;"><span>0%</span></div>
+                <p>CPU</p>
+            </div>
+            <div class="sys-meter">
+                <div class="sys-dial" id="ram-dial" style="--val: 0%;"><span>0%</span></div>
+                <p>RAM</p>
+                <small id="ram-text">-</small>
+            </div>
+            <div class="sys-meter">
+                <div class="sys-dial" id="disk-dial" style="--val: 0%;"><span>0%</span></div>
+                <p>Disk</p>
+                <small id="disk-text">-</small>
             </div>
         </div>
     </div>
@@ -177,7 +209,8 @@
             loadAlerts(),
             loadBlockedIPs(),
             loadRecentConnections(),
-            loadTrafficChart()
+            loadTrafficChart(),
+            loadSystemResources()
         ]);
     }
 
@@ -188,9 +221,35 @@
             document.getElementById('total-users').textContent = data.total_users;
             document.getElementById('online-users').textContent = data.online_users;
             document.getElementById('today-traffic').textContent = formatBytes(data.today_traffic);
+            
+            // Fix total traffic not showing
+            const totalDisplay = document.getElementById('total-traffic');
+            if(totalDisplay) totalDisplay.textContent = formatBytes(data.total_traffic);
+            
             document.getElementById('today-connections').textContent = data.today_connections;
         } catch (error) {
             console.error('Error loading stats:', error);
+        }
+    }
+
+    async function loadSystemResources() {
+        try {
+            const res = await apiGet('/api/dashboard/system-resources');
+            if(res.live) {
+                const live = res.live;
+                document.getElementById('cpu-dial').style.setProperty('--val', live.cpu_percent + '%');
+                document.getElementById('cpu-dial').querySelector('span').textContent = Math.round(live.cpu_percent) + '%';
+                
+                document.getElementById('ram-dial').style.setProperty('--val', live.ram_percent + '%');
+                document.getElementById('ram-dial').querySelector('span').textContent = Math.round(live.ram_percent) + '%';
+                document.getElementById('ram-text').textContent = formatBytes(live.ram_used) + ' / ' + formatBytes(live.ram_total);
+                
+                document.getElementById('disk-dial').style.setProperty('--val', live.disk_percent + '%');
+                document.getElementById('disk-dial').querySelector('span').textContent = Math.round(live.disk_percent) + '%';
+                document.getElementById('disk-text').textContent = formatBytes(live.disk_used) + ' / ' + formatBytes(live.disk_total);
+            }
+        } catch (error) {
+            console.error('Error loading resources', error);
         }
     }
 

@@ -2209,4 +2209,58 @@ textarea:focus {
     font-size: 1rem;
     position: relative;
     margin-top: 8px;
+}
+
+/* System Resources CSS */
+.sys-resources-wrapper {
+    margin-bottom: 2rem;
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    border: 1px solid var(--border-color);
+}
+.sys-grid {
+    display: flex;
+    gap: 2rem;
+    justify-content: space-around;
+}
+.sys-meter {
+    text-align: center;
+    flex: 1;
+}
+.sys-meter p {
+    margin-top: 8px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.sys-meter small {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-top: 4px;
+}
+.sys-dial {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent-primary) var(--val), var(--bg-tertiary) 0);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    position: relative;
+    transition: background 0.3s ease;
+}
+.sys-dial::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    background: var(--bg-card);
+    border-radius: 50%;
+}
+.sys-dial span {
+    position: relative;
+    font-weight: bold;
+    font-size: 1.2rem;
+    color: var(--text-primary);
 }
