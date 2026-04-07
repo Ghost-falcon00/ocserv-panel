@@ -137,6 +137,13 @@ class FirewallService:
         with open(conf_file, "w") as f:
             f.write(f"# Group {group.name} DNS Config\n")
             
+            # --- Force Disable Secure DNS (DoH) in Browsers (Canary Injection) ---
+            # These trigger NXDOMAIN in the browser, forcing them to surrender DoH
+            f.write("server=/use-application-dns.net/\n") # Firefox Canary
+            f.write("server=/mask.icloud.com/\n")         # Apple Private Relay
+            f.write("server=/mask-h2.icloud.com/\n")      # Apple Private Relay
+
+            
             # --- Dynamic Upstream DNS for Categories ---
             # Default DNS for normal queries (fastest)
             upstream_dns = ["1.1.1.1", "8.8.8.8"]
@@ -222,10 +229,11 @@ class FirewallService:
         # 1.5. Explicit domain string matches (Legacy DPI fallback)
         blocked_domains = group.blocked_domains or []
         
-        # If any user in this group has explicitly blocked domains, we categorically DROP ALL QUIC (UDP 443).
+        # If any user in this group has explicitly blocked domains or categories, we categorically DROP ALL QUIC (UDP 443).
         # This forces the apps to fallback to TCP 443 where Server Name Indication (SNI) is sent unencrypted
-        # allowing our string-matching DPI to flawlessly intercept "instagram", etc.
-        if blocked_domains:
+        # allowing our string-matching DPI to flawlessly intercept "instagram", etc., AND breaking QUIC-based DoH.
+        categories = group.blocked_categories or []
+        if blocked_domains or categories:
             # Drop all QUIC traffic for evasion-prevention
             subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", "-j", "DROP"])
             subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", "-m", "limit", "--limit", "2/sec", "-j", "LOG", "--log-prefix", "FW_QUIC_DROP: "])
@@ -260,7 +268,13 @@ class FirewallService:
             subprocess.run([CMD_IPTABLES, "-t", "nat", "-I", "PREROUTING", "-s", vpn_ip, "-p", "tcp", 
                             "--dport", "53", "-j", "REDIRECT", "--to-ports", str(port)])
             # Block well-known DoH (DNS-over-HTTPS) providers to prevent bypass
-            doh_ips = ["8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112"]
+            doh_ips = [
+                "8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9", "149.112.112.112", # Google, CF, Quad9
+                "208.67.222.222", "208.67.220.220", "208.67.222.123", "208.67.220.123",   # OpenDNS
+                "94.140.14.14", "94.140.15.15", "94.140.14.15", "94.140.15.16",           # AdGuard
+                "1.1.1.2", "1.0.0.2", "1.1.1.3", "1.0.0.3",                               # CF Families
+                "76.76.2.0", "76.76.10.0"                                                 # ControlD
+            ]
             for dip in doh_ips:
                 subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-d", dip, "-p", "tcp", "--dport", "443", "-j", "DROP"])
                 subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-d", dip, "-p", "udp", "--dport", "443", "-j", "DROP"])
