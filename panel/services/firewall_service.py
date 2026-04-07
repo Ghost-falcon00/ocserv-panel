@@ -130,8 +130,8 @@ class FirewallService:
         with open(conf_file, "w") as f:
             f.write(f"# Group {group.name} DNS Config\n")
             # Auto-populate the groups explicit IPSet from DNSmasq
-            ipset_v4 = f"ocserv_g_{group.id}_ips"
-            ipset_v6 = f"ocserv_g_{group.id}_ips_v6"
+            ipset_v4 = f"ocserv_g_{group.id}_net"
+            ipset_v6 = f"ocserv_g_{group.id}_net_v6"
             for domain in explicit_blocks:
                 base = domain.replace('www.', '')
                 f.write(f"address=/.{base}/0.0.0.0\n")
@@ -178,20 +178,29 @@ class FirewallService:
         import subprocess
         
         # 1. IPSet based block (Matches any dynamically scanned IP or DNSmasq intercepted IP)
-        ipset_v4 = f"ocserv_g_{group.id}_ips"
-        ipset_v6 = f"ocserv_g_{group.id}_ips_v6"
+        # Using hash:net now for Subnet Level Aggressive Blocking
+        ipset_v4 = f"ocserv_g_{group.id}_net"
+        ipset_v6 = f"ocserv_g_{group.id}_net_v6"
         CMD_IPSET = shutil.which("ipset") or "/sbin/ipset"
         
         # Ensure the ipsets exist (avoids iptables failing if scanner hasn't run yet)
-        subprocess.run([CMD_IPSET, "create", ipset_v4, "hash:ip", "-exist"])
-        subprocess.run([CMD_IPSET, "create", ipset_v6, "hash:ip", "family", "inet6", "-exist"])
+        subprocess.run([CMD_IPSET, "create", ipset_v4, "hash:net", "-exist"])
+        subprocess.run([CMD_IPSET, "create", ipset_v6, "hash:net", "family", "inet6", "-exist"])
         
-        # Block IPs in the IPSet
+        # Block Subnets in the IPSet
         subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-m", "set", "--match-set", ipset_v4, "dst", "-j", "DROP"])
         # (Assuming IPv6 isn't heavily used in OCServ yet, but if it is, ip6tables should be used)
         
         # 1.5. Explicit domain string matches (Legacy DPI fallback)
         blocked_domains = group.blocked_domains or []
+        
+        # If any user in this group has explicitly blocked domains, we categorically DROP ALL QUIC (UDP 443).
+        # This forces the apps to fallback to TCP 443 where Server Name Indication (SNI) is sent unencrypted
+        # allowing our string-matching DPI to flawlessly intercept "instagram", etc.
+        if blocked_domains:
+            # Drop all QUIC traffic for evasion-prevention
+            subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", "-j", "DROP"])
+            
         for domain in blocked_domains:
             # Extract core keyword for DPI (e.g. "instagram.com" -> "instagram")
             # to match raw DNS packets (which don't use literal dots) and all subdomains efficiently.
@@ -202,11 +211,8 @@ class FirewallService:
             # Block DNS (UDP 53)
             subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "53", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
-            # Block HTTPS (TCP 443) -> Kills SNI
+            # Block HTTPS (TCP 443) -> Kills SNI (this now catches everything due to QUIC drop above)
             subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "443", 
-                            "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
-            # Block HTTP3/QUIC (UDP 443) -> Kills UDP bypass for instagram/youtube
-            subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "udp", "--dport", "443", 
                             "-m", "string", "--string", keyword, "--algo", "bm", "-j", "DROP"])
             # Block HTTP (TCP 80)
             subprocess.run([CMD_IPTABLES, "-I", "FORWARD", "-s", vpn_ip, "-p", "tcp", "--dport", "80", 

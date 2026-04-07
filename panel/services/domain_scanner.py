@@ -127,25 +127,29 @@ class DomainScanner:
 
     @classmethod
     async def sync_group_ipset(cls, group_id: int, ips: Set[str]):
-        """Creates/Updates the Linux IPSet with the scanned IPs"""
+        """Creates/Updates the Linux IPSet with the scanned IPs (Expanded to Subnets)"""
         import subprocess
         
-        set_name = f"ocserv_g_{group_id}_ips"
+        # We use a new name to avoid conflict with old hash:ip sets
+        set_name = f"ocserv_g_{group_id}_net"
         
-        # 1. Ensure IPSet exists
-        subprocess.run([CMD_IPSET, "create", set_name, "hash:ip", "-exist"], 
+        # 1. Ensure IPSet exists with hash:net
+        subprocess.run([CMD_IPSET, "create", set_name, "hash:net", "-exist"], 
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run([CMD_IPSET, "create", f"{set_name}_v6", "hash:ip", "family", "inet6", "-exist"], 
+        subprocess.run([CMD_IPSET, "create", f"{set_name}_v6", "hash:net", "family", "inet6", "-exist"], 
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        # 2. Add IPs (we use a loop to handle ipv4/ipv6 separately)
+        # 2. Add IPs as subnets
         for ip in ips:
-            # Detect ipv6
             if ":" in ip:
-                subprocess.run([CMD_IPSET, "add", f"{set_name}_v6", ip, "-exist"], 
+                # IPv6: Expand to /64 subnet
+                subnet = f"{ip}/64"
+                subprocess.run([CMD_IPSET, "add", f"{set_name}_v6", subnet, "-exist"], 
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
-                subprocess.run([CMD_IPSET, "add", set_name, ip, "-exist"], 
+                # IPv4: Expand to /24 subnet (blocks 256 localized servers at once)
+                subnet = f"{ip}/24"
+                subprocess.run([CMD_IPSET, "add", set_name, subnet, "-exist"], 
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     @classmethod
