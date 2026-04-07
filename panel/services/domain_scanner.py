@@ -8,7 +8,8 @@ from sqlalchemy import select
 from models.database import async_session
 from models.group import UserGroup
 
-logger = logging.getLogger(__name__)
+# Use uvicorn's active logger so it appears in journalctl
+logger = logging.getLogger("uvicorn.error")
 
 CMD_IPSET = shutil.which("ipset") or "/sbin/ipset"
 
