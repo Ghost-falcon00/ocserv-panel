@@ -193,14 +193,14 @@ class TrafficService:
                     update(User)
                     .where(User.is_online == True)
                     .where(User.username.notin_(online_usernames))
-                    .values(is_online=False, current_connections=0)
+                    .values(is_online=False, current_connections=0, last_connection=datetime.utcnow())
                 )
             else:
                 # No one is online, mark all as offline
                 stmt = (
                     update(User)
                     .where(User.is_online == True)
-                    .values(is_online=False, current_connections=0)
+                    .values(is_online=False, current_connections=0, last_connection=datetime.utcnow())
                 )
             await session.execute(stmt)
             

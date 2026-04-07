@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
 OCSERV_DNS_DIR = "/etc/ocserv/dns"
 DNSMASQ_BASE_PORT = 53000
 
-# Category Blocklists
+# Category Blocklists (Using Mirror for Iran Access)
 CATEGORIES = {
-    "porn": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts",
-    "ads": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-    "gambling": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts",
-    "fakenews": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/hosts"
+    "porn": "https://ghproxy.net/https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts",
+    "ads": "https://ghproxy.net/https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+    "gambling": "https://ghproxy.net/https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts",
+    "fakenews": "https://ghproxy.net/https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/hosts"
 }
 
 class FirewallService:

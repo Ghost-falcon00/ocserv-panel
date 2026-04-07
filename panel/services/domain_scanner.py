@@ -108,6 +108,7 @@ class DomainScanner:
             for group in groups:
                 explicit_blocks = group.blocked_domains or []
                 if not explicit_blocks:
+                    await cls.sync_group_ipset(group.id, set())
                     continue
                     
                 target_ips = set()
@@ -171,6 +172,7 @@ class DomainScanner:
             explicit_blocks = group.blocked_domains or []
             if not explicit_blocks:
                 logger.info(f"DomainScanner: No explicit blocks for group {group.name}")
+                await cls.sync_group_ipset(group.id, set())
                 return
                 
             target_ips = set()
@@ -232,8 +234,12 @@ class DomainScanner:
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([CMD_IPSET, "create", f"{set_name}_v6", "hash:net", "family", "inet6", "-exist"], 
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                       
+        # 2. Flush old IPs to ensure removed domains are instantly unblocked
+        subprocess.run([CMD_IPSET, "flush", set_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([CMD_IPSET, "flush", f"{set_name}_v6"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        # 2. Add IPs as subnets
+        # 3. Add IPs as subnets
         for ip in ips:
             try:
                 # Direct Static Subnet injection (from Telegram etc)
